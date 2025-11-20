@@ -253,6 +253,11 @@ services:
       DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-True}
       
       # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       CONN_MAX_AGE: 60
       
@@ -320,6 +325,12 @@ services:
       # Inherit all Django environment variables
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       BREVO_API_KEY: ${BREVO_API_KEY}
@@ -352,6 +363,12 @@ services:
       # Inherit all Django environment variables
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       BREVO_API_KEY: ${BREVO_API_KEY}
@@ -535,10 +552,20 @@ log_success "Secrets generated"
 # ============================================
 log_info "Step 6/10: Configuration..."
 
-read -p "Enter your APPLICATION domain (e.g., go.aivus.co): " APP_DOMAIN
-read -p "Enter your SERVICE domain (e.g., aivus.co): " SERVICE_DOMAIN
-read -p "Enter your email for Let's Encrypt: " ACME_EMAIL
-read -p "Enter your email for pgAdmin: " PGADMIN_EMAIL
+read -p "Enter your APPLICATION domain [go.aivus.co]: " APP_DOMAIN
+APP_DOMAIN=${APP_DOMAIN:-go.aivus.co}
+
+read -p "Enter your SERVICE domain [aivus.co]: " SERVICE_DOMAIN
+SERVICE_DOMAIN=${SERVICE_DOMAIN:-aivus.co}
+
+read -p "Enter your email for Let's Encrypt [hi@aivus.co]: " ACME_EMAIL
+ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
+
+read -p "Enter your email for pgAdmin [hi@aivus.co]: " PGADMIN_EMAIL
+PGADMIN_EMAIL=${PGADMIN_EMAIL:-hi@aivus.co}
+
+read -p "Enter GCP Storage Bucket name [aivus-production-media]: " GCP_BUCKET_NAME
+GCP_BUCKET_NAME=${GCP_BUCKET_NAME:-aivus-production-media}
 
 # Optional: Google OAuth
 read -p "Do you have Google OAuth credentials? (y/n): " HAS_GOOGLE_OAUTH
@@ -632,7 +659,8 @@ DJANGO_SERVER_EMAIL=server@${APP_DOMAIN}
 # ===========================================
 # GCP STORAGE
 # ===========================================
-DJANGO_GCP_STORAGE_BUCKET_NAME=aivus-production-media
+DJANGO_GCP_STORAGE_BUCKET_NAME=${GCP_BUCKET_NAME}
+GCP_CREDENTIALS_PATH=$HOME/data/gcp-credentials.json
 
 # ===========================================
 # SENTRY
