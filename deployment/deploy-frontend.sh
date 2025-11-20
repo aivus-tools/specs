@@ -97,3 +97,4 @@ log_info "Check logs with:"
 echo "  docker compose -f docker-compose.production.yml logs -f frontend"
 echo ""
 
+

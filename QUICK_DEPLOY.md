@@ -2,6 +2,16 @@
 
 Follow these steps to deploy Aivus to a fresh server (Ubuntu/Debian recommended).
 
+## ⚠️ Important: Safe Re-installation
+
+**The install script is SAFE to re-run!** It will:
+- ✅ Detect existing installation
+- ✅ Preserve all secrets and passwords
+- ✅ Create backups before overwriting
+- ✅ Ask for confirmation before regenerating secrets
+
+**Never lose your database password again!**
+
 ## 1. Prerequisites
 
 You need:
@@ -68,8 +78,88 @@ Open your browser and check:
 *   Flower: `https://flower.aivus.co`
 *   pgAdmin: `https://pgadmin.aivus.co`
 
-## 4. Troubleshooting
+## 4. Database Backup & Restore
+
+The deployment includes Postgres maintenance scripts for easy backup and restore:
+
+### Create a Backup
+```bash
+docker compose -f docker-compose.production.yml exec postgres backup
+```
+
+### List Backups
+```bash
+docker compose -f docker-compose.production.yml exec postgres backups
+```
+
+### Restore from Backup
+```bash
+docker compose -f docker-compose.production.yml exec postgres restore backup_2024_01_15T10_30_00.sql.gz
+```
+
+### Remove a Backup
+```bash
+docker compose -f docker-compose.production.yml exec postgres rmbackup backup_2024_01_15T10_30_00.sql.gz
+```
+
+Backups are stored in the `postgres_backups` volume and persist across container restarts.
+
+## 5. Versions
+
+*   **Postgres:** 17
+*   **Traefik:** 3.5.3
+*   **Redis:** 7-alpine
+*   **Python:** 3.13
+*   **Node.js:** (as per frontend Dockerfile)
+
+## 6. Re-running the Installer
+
+If you need to update configuration or reinstall:
+
+```bash
+cd ~/aivus
+./install.sh
+```
+
+The script will:
+1. **Detect existing installation**
+2. **Ask what you want to do:**
+   - Option 1: Keep existing secrets (SAFE - recommended)
+   - Option 2: Generate new secrets (requires database recreation)
+   - Option 3: Exit to backup manually
+
+3. **Create backups** of `.env` and `CREDENTIALS.txt` with timestamps
+
+**Example scenario:**
+```bash
+# You want to update domain or add OAuth keys
+./install.sh
+# Choose option 1 (keep secrets)
+# Update only what you need
+# Restart services
+docker compose -f docker-compose.production.yml restart
+```
+
+## 7. Manual Backup (Recommended)
+
+Before major changes, create manual backups:
+
+```bash
+# Backup configuration
+cp ~/aivus/.env ~/aivus/.env.manual.backup
+cp ~/aivus/CREDENTIALS.txt ~/aivus/CREDENTIALS.txt.manual.backup
+
+# Backup database
+docker compose -f docker-compose.production.yml exec postgres backup
+
+# Download backups to local machine
+scp user@server:~/aivus/.env.manual.backup ./
+scp user@server:~/aivus/CREDENTIALS.txt.manual.backup ./
+```
+
+## 8. Troubleshooting
 
 *   **Logs:** `docker compose -f docker-compose.production.yml logs -f`
 *   **Status:** `docker compose -f docker-compose.production.yml ps`
 *   **Restart:** `docker compose -f docker-compose.production.yml restart`
+*   **Lost credentials?** Check backup files: `ls -la ~/aivus/*.backup*`

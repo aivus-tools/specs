@@ -30,27 +30,36 @@
 
 ---
 
-### 2. `install.sh`
+### 2. `install.sh` ⭐
 Главный скрипт установки для нового сервера.
+
+**🔒 БЕЗОПАСЕН ДЛЯ ПОВТОРНОГО ЗАПУСКА!**
 
 **Что делает:**
 1. Устанавливает Docker и Docker Compose
 2. Создает необходимые директории
-3. Генерирует все секреты автоматически
-4. Создает `.env` файл
-5. Сохраняет credentials в `CREDENTIALS.txt`
-6. Настраивает GCP authentication
+3. **Обнаруживает существующую установку**
+4. **Сохраняет существующие секреты** (или генерирует новые)
+5. Создает `.env` файл (с автоматическим бэкапом)
+6. Сохраняет credentials в `CREDENTIALS.txt`
+7. Настраивает GCP authentication
 
 **Использование:**
 ```bash
-# Скопируй на сервер
-scp install.sh user@server:~/
-
-# Запусти
+# Первая установка
 ssh user@server
-chmod +x install.sh
+curl -sSL https://raw.githubusercontent.com/.../install.sh | bash
+
+# Повторный запуск (безопасно!)
+cd ~/aivus
 ./install.sh
+# Выбери опцию 1: Keep existing secrets (рекомендуется)
 ```
+
+**Режимы работы:**
+- **Опция 1:** Сохранить существующие секреты (SAFE) ✅
+- **Опция 2:** Сгенерировать новые секреты (DANGEROUS) ⚠️
+- **Опция 3:** Выход для ручного бэкапа
 
 **Что нужно подготовить:**
 - Домен с настроенными DNS записями
@@ -60,6 +69,8 @@ chmod +x install.sh
 - (Опционально) Brevo API key
 - (Опционально) Sentry DSN
 - GCP service account JSON файл
+
+**📖 Подробнее:** См. `SAFE_REINSTALL.md`
 
 ---
 
@@ -392,6 +403,25 @@ docker compose -f docker-compose.production.yml logs traefik
 - `~/aivus/CREDENTIALS.txt` - credentials (chmod 600)
 - `~/data/gcp-credentials.json` - GCP credentials (chmod 600)
 
+### Автоматические бэкапы конфигурации
+При повторном запуске `install.sh` создаются бэкапы:
+```bash
+~/aivus/.env.backup.YYYYMMDD_HHMMSS
+~/aivus/CREDENTIALS.txt.backup.YYYYMMDD_HHMMSS
+```
+
+### Восстановление из бэкапа
+```bash
+# Найти последний бэкап
+ls -lt ~/aivus/.env.backup* | head -1
+
+# Восстановить
+cp ~/aivus/.env.backup.20241120_153045 ~/aivus/.env
+
+# Перезапустить сервисы
+docker compose -f docker-compose.production.yml restart
+```
+
 ### Рекомендации
 - ✅ Регулярно обновляй Docker образы
 - ✅ Настрой firewall (разрешить только 80, 443, 22)
@@ -399,15 +429,20 @@ docker compose -f docker-compose.production.yml logs traefik
 - ✅ Включи 2FA для GitHub
 - ✅ Регулярно проверяй логи
 - ✅ Настрой мониторинг и алерты
+- ✅ **Скачивай бэкапы `.env` на локальную машину**
 
 ---
 
 ## 📚 Дополнительные ресурсы
 
+- **🔒 Безопасная переустановка:** `SAFE_REINSTALL.md` (ВАЖНО!)
+- **🔧 Troubleshooting:** `TROUBLESHOOTING.md` (Решение проблем)
+- **📋 Шпаргалка:** `CHEATSHEET.md` (Быстрые команды)
 - **Основная документация:** `/Specs/DEPLOYMENT.md`
 - **Переменные окружения:** `/Specs/ENV_VARIABLES.md`
 - **Архитектура:** `/Specs/DEPLOYMENT_ARCHITECTURE.md`
 - **GCP Setup:** `/Specs/GCP_SETUP.md`
+- **Быстрый старт:** `/Specs/QUICK_DEPLOY.md`
 
 ---
 

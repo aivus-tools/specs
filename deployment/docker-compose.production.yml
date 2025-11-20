@@ -118,6 +118,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: /start
     environment:
       # Django Core
       DJANGO_SETTINGS_MODULE: config.settings.production

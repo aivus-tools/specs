@@ -423,3 +423,4 @@ User
 - **Old Backend:** `/JSBackend` - старый NestJS backend (для справки)
 - **Tests:** `/Backend/aivus_backend/test` - E2E тесты
 
+

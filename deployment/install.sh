@@ -6,6 +6,11 @@
 # This script installs and configures Aivus
 # on a fresh server.
 #
+# SAFE FOR RE-RUNNING:
+#   - Detects existing installation
+#   - Preserves existing secrets and passwords
+#   - Creates backups before overwriting
+#
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/.../install.sh | bash
 #   # OR
@@ -116,7 +121,7 @@ services:
   # Traefik - Reverse Proxy & SSL
   # ===========================================
   traefik:
-    image: traefik:v2.11
+    image: traefik:3.5.3
     container_name: aivus_traefik
     restart: unless-stopped
     networks:
@@ -124,50 +129,16 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"  # Traefik dashboard (optional, can be disabled)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_acme:/letsencrypt
-    command:
-      # API and Dashboard
-      - "--api.dashboard=true"
-      - "--api.insecure=true"  # Dashboard on :8080 without auth (set false in prod)
-      
-      # Providers
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=aivus"
-      
-      # Entrypoints
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      
-      # Let's Encrypt
-      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      
-      # Logging
-      - "--log.level=INFO"
-      - "--accesslog=true"
-    labels:
-      - "traefik.enable=true"
-      # Dashboard routing
-      - "traefik.http.routers.traefik.rule=Host(`traefik.${SERVICE_DOMAIN}`)"
-      - "traefik.http.routers.traefik.entrypoints=websecure"
-      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.traefik.service=api@internal"
-      # Basic auth for dashboard
-      - "traefik.http.routers.traefik.middlewares=traefik-auth"
-      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"
+      - $HOME/aivus/traefik.yml:/etc/traefik/traefik.yml:ro
 
   # ===========================================
   # PostgreSQL Database
   # ===========================================
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17
     container_name: aivus_postgres
     restart: unless-stopped
     networks:
@@ -175,6 +146,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - postgres_backups:/backups
+      - $HOME/aivus/maintenance:/usr/local/bin/maintenance:ro
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -244,6 +216,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: /start
     environment:
       # Django Core
       DJANGO_SETTINGS_MODULE: config.settings.production
@@ -397,6 +370,12 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     labels:
@@ -483,123 +462,564 @@ EOF
 log_success "Configuration files ready"
 
 # ============================================
-# 5. Generate secrets
+# 4.5. Create Traefik and Maintenance configs
 # ============================================
-log_info "Step 5/10: Generating secrets..."
+log_info "Step 4.5/10: Creating additional configuration files..."
 
-generate_secret() {
-    openssl rand -hex 32
+# Create Traefik configuration
+log_info "Creating traefik.yml..."
+cat > $HOME/aivus/traefik.yml << 'TRAEFIK_EOF'
+log:
+  level: INFO
+
+api:
+  dashboard: true
+
+entryPoints:
+  web:
+    address: ':80'
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ':443'
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ACME_EMAIL_PLACEHOLDER
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: aivus
+TRAEFIK_EOF
+
+# Replace placeholder with actual email
+sed -i.bak "s/ACME_EMAIL_PLACEHOLDER/${ACME_EMAIL}/" $HOME/aivus/traefik.yml
+rm $HOME/aivus/traefik.yml.bak
+
+log_success "traefik.yml created"
+
+# Create maintenance scripts directory
+log_info "Creating Postgres maintenance scripts..."
+mkdir -p $HOME/aivus/maintenance/_sourced
+
+# Create constants.sh
+cat > $HOME/aivus/maintenance/_sourced/constants.sh << 'EOF'
+#!/usr/bin/env bash
+
+
+BACKUP_DIR_PATH='/backups'
+BACKUP_FILE_PREFIX='backup'
+EOF
+
+# Create messages.sh
+cat > $HOME/aivus/maintenance/_sourced/messages.sh << 'EOF'
+#!/usr/bin/env bash
+
+
+message_newline() {
+    echo
 }
 
-generate_password() {
-    openssl rand -base64 32 | tr -d '=+/' | cut -c1-25
+message_debug()
+{
+    echo -e "DEBUG: ${@}"
 }
 
-generate_django_secret() {
-    openssl rand -base64 50 | tr -d '=+/' | cut -c1-50
+message_welcome()
+{
+    echo -e "\e[1m${@}\e[0m"
 }
 
-generate_basic_auth() {
-    local username="admin"
-    local password=$(openssl rand -base64 12 | tr -d '=+/')
+message_warning()
+{
+    echo -e "\e[33mWARNING\e[0m: ${@}"
+}
+
+message_error()
+{
+    echo -e "\e[31mERROR\e[0m: ${@}"
+}
+
+message_info()
+{
+    echo -e "\e[37mINFO\e[0m: ${@}"
+}
+
+message_suggestion()
+{
+    echo -e "\e[33mSUGGESTION\e[0m: ${@}"
+}
+
+message_success()
+{
+    echo -e "\e[32mSUCCESS\e[0m: ${@}"
+}
+EOF
+
+# Create backup script
+cat > $HOME/aivus/maintenance/backup << 'EOF'
+#!/usr/bin/env bash
+
+
+### Create a database backup.
+###
+### Usage:
+###     $ docker compose -f <environment>.yml (exec |run --rm) postgres backup
+
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+working_dir="$(dirname ${0})"
+source "${working_dir}/_sourced/constants.sh"
+source "${working_dir}/_sourced/messages.sh"
+
+
+message_welcome "Backing up the '${POSTGRES_DB}' database..."
+
+
+if [[ "${POSTGRES_USER}" == "postgres" ]]; then
+    message_error "Backing up as 'postgres' user is not supported. Assign 'POSTGRES_USER' env with another one and try again."
+    exit 1
+fi
+
+export PGHOST="${POSTGRES_HOST}"
+export PGPORT="${POSTGRES_PORT}"
+export PGUSER="${POSTGRES_USER}"
+export PGPASSWORD="${POSTGRES_PASSWORD}"
+export PGDATABASE="${POSTGRES_DB}"
+
+backup_filename="${BACKUP_FILE_PREFIX}_$(date +'%Y_%m_%dT%H_%M_%S').sql.gz"
+pg_dump | gzip > "${BACKUP_DIR_PATH}/${backup_filename}"
+
+
+message_success "'${POSTGRES_DB}' database backup '${backup_filename}' has been created and placed in '${BACKUP_DIR_PATH}'."
+EOF
+
+# Create restore script
+cat > $HOME/aivus/maintenance/restore << 'EOF'
+#!/usr/bin/env bash
+
+
+### Restore database from a backup.
+###
+### Parameters:
+###     <1> filename of an existing backup.
+###
+### Usage:
+###     $ docker compose -f <environment>.yml (exec |run --rm) postgres restore <1>
+
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+working_dir="$(dirname ${0})"
+source "${working_dir}/_sourced/constants.sh"
+source "${working_dir}/_sourced/messages.sh"
+
+
+if [[ -z ${1+x} ]]; then
+    message_error "Backup filename is not specified yet it is a required parameter. Make sure you provide one and try again."
+    exit 1
+fi
+backup_filename="${BACKUP_DIR_PATH}/${1}"
+if [[ ! -f "${backup_filename}" ]]; then
+    message_error "No backup with the specified filename found. Check out the 'backups' maintenance script output to see if there is one and try again."
+    exit 1
+fi
+
+message_welcome "Restoring the '${POSTGRES_DB}' database from the '${backup_filename}' backup..."
+
+if [[ "${POSTGRES_USER}" == "postgres" ]]; then
+    message_error "Restoring as 'postgres' user is not supported. Assign 'POSTGRES_USER' env with another one and try again."
+    exit 1
+fi
+
+export PGHOST="${POSTGRES_HOST}"
+export PGPORT="${POSTGRES_PORT}"
+export PGUSER="${POSTGRES_USER}"
+export PGPASSWORD="${POSTGRES_PASSWORD}"
+export PGDATABASE="${POSTGRES_DB}"
+
+message_info "Dropping the database..."
+dropdb "${PGDATABASE}"
+
+message_info "Creating a new database..."
+createdb --owner="${POSTGRES_USER}"
+
+message_info "Applying the backup to the new database..."
+gunzip -c "${backup_filename}" | psql "${POSTGRES_DB}"
+
+message_success "The '${POSTGRES_DB}' database has been restored from the '${backup_filename}' backup."
+EOF
+
+# Create backups script
+cat > $HOME/aivus/maintenance/backups << 'EOF'
+#!/usr/bin/env bash
+
+
+### View backups.
+###
+### Usage:
+###     $ docker compose -f <environment>.yml (exec |run --rm) postgres backups
+
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+working_dir="$(dirname ${0})"
+source "${working_dir}/_sourced/constants.sh"
+source "${working_dir}/_sourced/messages.sh"
+
+
+message_welcome "These are the backups you have got:"
+
+ls -lht "${BACKUP_DIR_PATH}"
+EOF
+
+# Create rmbackup script
+cat > $HOME/aivus/maintenance/rmbackup << 'EOF'
+#!/usr/bin/env bash
+
+### Remove a database backup.
+###
+### Parameters:
+###     <1> filename of a backup to remove.
+###
+### Usage:
+###     $ docker-compose -f <environment>.yml (exec |run --rm) postgres rmbackup <1>
+
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+
+working_dir="$(dirname ${0})"
+source "${working_dir}/_sourced/constants.sh"
+source "${working_dir}/_sourced/messages.sh"
+
+
+if [[ -z ${1+x} ]]; then
+    message_error "Backup filename is not specified yet it is a required parameter. Make sure you provide one and try again."
+    exit 1
+fi
+backup_filename="${BACKUP_DIR_PATH}/${1}"
+if [[ ! -f "${backup_filename}" ]]; then
+    message_error "No backup with the specified filename found. Check out the 'backups' maintenance script output to see if there is one and try again."
+    exit 1
+fi
+
+message_welcome "Removing the '${backup_filename}' backup file..."
+
+rm -r "${backup_filename}"
+
+message_success "The '${backup_filename}' database backup has been removed."
+EOF
+
+# Make scripts executable
+chmod +x $HOME/aivus/maintenance/backup
+chmod +x $HOME/aivus/maintenance/restore
+chmod +x $HOME/aivus/maintenance/backups
+chmod +x $HOME/aivus/maintenance/rmbackup
+chmod +x $HOME/aivus/maintenance/_sourced/constants.sh
+chmod +x $HOME/aivus/maintenance/_sourced/messages.sh
+
+log_success "Maintenance scripts created and made executable"
+
+# ============================================
+# 5. Check for existing installation
+# ============================================
+log_info "Step 5/10: Checking for existing installation..."
+
+ENV_FILE="$HOME/aivus/.env"
+CREDENTIALS_FILE="$HOME/aivus/CREDENTIALS.txt"
+
+if [ -f "$ENV_FILE" ]; then
+    log_warning "Found existing installation at ~/aivus/"
+    log_warning "Existing .env file detected!"
+    echo ""
+    echo "Options:"
+    echo "  1) Keep existing secrets and configuration (SAFE - recommended)"
+    echo "  2) Generate new secrets (DANGEROUS - will break existing database!)"
+    echo "  3) Exit and backup manually"
+    echo ""
+    read -p "Choose option [1]: " REINSTALL_OPTION
+    REINSTALL_OPTION=${REINSTALL_OPTION:-1}
     
-    # Check if htpasswd is available
-    if command -v htpasswd &> /dev/null; then
-        echo $(htpasswd -nb "$username" "$password")
+    if [ "$REINSTALL_OPTION" = "3" ]; then
+        log_info "Exiting. Please backup your data first:"
+        echo "  cp ~/aivus/.env ~/aivus/.env.backup"
+        echo "  cp ~/aivus/CREDENTIALS.txt ~/aivus/CREDENTIALS.txt.backup"
+        exit 0
+    elif [ "$REINSTALL_OPTION" = "1" ]; then
+        log_info "Loading existing secrets from .env..."
+        EXISTING_INSTALL=true
+        
+        # Load existing .env safely (avoid executing special characters)
+        LOADED_COUNT=0
+        while IFS= read -r line; do
+            # Skip comments and empty lines
+            [[ $line =~ ^[[:space:]]*# ]] && continue
+            [[ -z $line ]] && continue
+            [[ ! $line =~ = ]] && continue
+            
+            # Extract key and value
+            key="${line%%=*}"
+            value="${line#*=}"
+            
+            # Trim whitespace from key
+            key=$(echo "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            
+            # Skip if key is empty
+            [[ -z $key ]] && continue
+            
+            # Remove leading/trailing whitespace and quotes from value
+            value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+            
+            # Export the variable (using eval to handle special characters safely)
+            if eval "export $key=\"\$value\"" 2>/dev/null; then
+                LOADED_COUNT=$((LOADED_COUNT + 1))
+            else
+                log_warning "Failed to load variable: $key (skipping)"
+            fi
+        done < "$ENV_FILE"
+        
+        log_success "Existing secrets loaded successfully ($LOADED_COUNT variables)"
+        log_info "Will preserve: Database password, Django secrets, API keys, etc."
+        
+        # Verify critical variables are loaded
+        if [ -z "$POSTGRES_PASSWORD" ] || [ -z "$DJANGO_SECRET_KEY" ]; then
+            log_error "Critical secrets not found in .env file!"
+            log_error "POSTGRES_PASSWORD or DJANGO_SECRET_KEY is missing."
+            log_error "Please check your .env file or choose option 2 to regenerate."
+            exit 1
+        fi
     else
-        log_warning "htpasswd not found, using plain password"
-        echo "$username:$password"
+        log_error "⚠️  WARNING: Generating new secrets will break your existing database!"
+        log_error "⚠️  You will need to:"
+        log_error "     1. Backup your database"
+        log_error "     2. Drop and recreate it with new password"
+        log_error "     3. Restore from backup"
+        echo ""
+        read -p "Type 'I UNDERSTAND' to continue: " CONFIRM
+        if [ "$CONFIRM" != "I UNDERSTAND" ]; then
+            log_error "Aborted. Please backup your data first."
+            exit 1
+        fi
+        EXISTING_INSTALL=false
+    fi
+else
+    log_info "No existing installation found. Will generate new secrets."
+    EXISTING_INSTALL=false
+fi
+
+# ============================================
+# 6. Generate or load secrets
+# ============================================
+if [ "$EXISTING_INSTALL" = false ]; then
+    log_info "Step 6/10: Generating secrets..."
+    
+    generate_secret() {
+        openssl rand -hex 32
+    }
+    
+    generate_password() {
+        openssl rand -base64 32 | tr -d '=+/' | cut -c1-25
+    }
+    
+    generate_django_secret() {
+        openssl rand -base64 50 | tr -d '=+/' | cut -c1-50
+    }
+    
+    generate_basic_auth() {
+        local username="admin"
+        local password=$(openssl rand -base64 12 | tr -d '=+/')
+        
+        # Check if htpasswd is available
+        if command -v htpasswd &> /dev/null; then
+            echo $(htpasswd -nb "$username" "$password")
+        else
+            log_warning "htpasswd not found, using plain password"
+            echo "$username:$password"
+        fi
+        
+        echo "# Username: $username, Password: $password" >&2
+    }
+    
+    log_info "Generating Django secret key..."
+    DJANGO_SECRET_KEY=$(generate_django_secret)
+    
+    log_info "Generating HMAC secret..."
+    HMAC_SECRET=$(generate_secret)
+    
+    log_info "Generating API key..."
+    API_KEY=$(generate_secret)
+    
+    log_info "Generating NextAuth secret..."
+    NEXTAUTH_SECRET=$(openssl rand -base64 32)
+    
+    log_info "Generating PostgreSQL password..."
+    POSTGRES_PASSWORD=$(generate_password)
+    
+    log_info "Generating pgAdmin password..."
+    PGADMIN_PASSWORD=$(generate_password)
+    
+    log_info "Generating Basic Auth credentials..."
+    log_info "Traefik Dashboard:"
+    TRAEFIK_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "Flower:"
+    FLOWER_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "Mailpit:"
+    MAILPIT_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "pgAdmin:"
+    PGADMIN_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_success "Secrets generated"
+else
+    log_info "Step 6/10: Using existing secrets..."
+    log_success "Secrets loaded from existing .env"
+fi
+
+# ============================================
+# 7. Prompt for configuration
+# ============================================
+log_info "Step 7/10: Configuration..."
+
+if [ "$EXISTING_INSTALL" = true ]; then
+    log_info "Using existing configuration from .env"
+    log_info "Current APP_DOMAIN: ${APP_DOMAIN}"
+    log_info "Current SERVICE_DOMAIN: ${SERVICE_DOMAIN}"
+    echo ""
+    read -p "Do you want to update configuration? (y/n) [n]: " UPDATE_CONFIG
+    UPDATE_CONFIG=${UPDATE_CONFIG:-n}
+    
+    if [ "$UPDATE_CONFIG" = "n" ]; then
+        log_info "Keeping existing configuration"
+        # Ensure PGADMIN_EMAIL is set (might not exist in old .env)
+        PGADMIN_EMAIL=${PGADMIN_DEFAULT_EMAIL:-hi@aivus.co}
+        ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
+        GCP_BUCKET_NAME=${DJANGO_GCP_STORAGE_BUCKET_NAME:-aivus-production-media}
+    else
+        log_info "Updating configuration..."
+        read -p "Enter your APPLICATION domain [${APP_DOMAIN}]: " NEW_APP_DOMAIN
+        APP_DOMAIN=${NEW_APP_DOMAIN:-$APP_DOMAIN}
+        
+        read -p "Enter your SERVICE domain [${SERVICE_DOMAIN}]: " NEW_SERVICE_DOMAIN
+        SERVICE_DOMAIN=${NEW_SERVICE_DOMAIN:-$SERVICE_DOMAIN}
+        
+        read -p "Enter your email for Let's Encrypt [${ACME_EMAIL}]: " NEW_ACME_EMAIL
+        ACME_EMAIL=${NEW_ACME_EMAIL:-$ACME_EMAIL}
+        
+        read -p "Enter your email for pgAdmin [${PGADMIN_DEFAULT_EMAIL}]: " NEW_PGADMIN_EMAIL
+        PGADMIN_EMAIL=${NEW_PGADMIN_EMAIL:-$PGADMIN_DEFAULT_EMAIL}
+        
+        read -p "Enter GCP Storage Bucket name [${DJANGO_GCP_STORAGE_BUCKET_NAME}]: " NEW_GCP_BUCKET_NAME
+        GCP_BUCKET_NAME=${NEW_GCP_BUCKET_NAME:-$DJANGO_GCP_STORAGE_BUCKET_NAME}
+        
+        # Keep existing OAuth/API keys unless user wants to change
+        read -p "Update Google OAuth credentials? (y/n) [n]: " UPDATE_OAUTH
+        if [ "$UPDATE_OAUTH" = "y" ]; then
+            read -p "Enter Google OAuth Client ID [${AUTH_GOOGLE_ID}]: " NEW_AUTH_GOOGLE_ID
+            AUTH_GOOGLE_ID=${NEW_AUTH_GOOGLE_ID:-$AUTH_GOOGLE_ID}
+            read -p "Enter Google OAuth Client Secret: " NEW_AUTH_GOOGLE_SECRET
+            if [ -n "$NEW_AUTH_GOOGLE_SECRET" ]; then
+                AUTH_GOOGLE_SECRET=$NEW_AUTH_GOOGLE_SECRET
+            fi
+        fi
+        
+        read -p "Update Brevo API key? (y/n) [n]: " UPDATE_BREVO
+        if [ "$UPDATE_BREVO" = "y" ]; then
+            read -p "Enter Brevo API key: " NEW_BREVO_API_KEY
+            if [ -n "$NEW_BREVO_API_KEY" ]; then
+                BREVO_API_KEY=$NEW_BREVO_API_KEY
+            fi
+        fi
+        
+        read -p "Update Sentry DSN? (y/n) [n]: " UPDATE_SENTRY
+        if [ "$UPDATE_SENTRY" = "y" ]; then
+            read -p "Enter Sentry DSN: " NEW_SENTRY_DSN
+            if [ -n "$NEW_SENTRY_DSN" ]; then
+                SENTRY_DSN=$NEW_SENTRY_DSN
+            fi
+        fi
+    fi
+else
+    # Fresh installation - ask for everything
+    read -p "Enter your APPLICATION domain [go.aivus.co]: " APP_DOMAIN
+    APP_DOMAIN=${APP_DOMAIN:-go.aivus.co}
+    
+    read -p "Enter your SERVICE domain [aivus.co]: " SERVICE_DOMAIN
+    SERVICE_DOMAIN=${SERVICE_DOMAIN:-aivus.co}
+    
+    read -p "Enter your email for Let's Encrypt [hi@aivus.co]: " ACME_EMAIL
+    ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
+    
+    read -p "Enter your email for pgAdmin [hi@aivus.co]: " PGADMIN_EMAIL
+    PGADMIN_EMAIL=${PGADMIN_EMAIL:-hi@aivus.co}
+    
+    read -p "Enter GCP Storage Bucket name [aivus-production-media]: " GCP_BUCKET_NAME
+    GCP_BUCKET_NAME=${GCP_BUCKET_NAME:-aivus-production-media}
+    
+    # Optional: Google OAuth
+    read -p "Do you have Google OAuth credentials? (y/n): " HAS_GOOGLE_OAUTH
+    if [ "$HAS_GOOGLE_OAUTH" = "y" ]; then
+        read -p "Enter Google OAuth Client ID: " AUTH_GOOGLE_ID
+        read -p "Enter Google OAuth Client Secret: " AUTH_GOOGLE_SECRET
+    else
+        AUTH_GOOGLE_ID=""
+        AUTH_GOOGLE_SECRET=""
+        log_warning "Google OAuth not configured. You can add it to .env later if needed."
     fi
     
-    echo "# Username: $username, Password: $password" >&2
-}
-
-log_info "Generating Django secret key..."
-DJANGO_SECRET_KEY=$(generate_django_secret)
-
-log_info "Generating HMAC secret..."
-HMAC_SECRET=$(generate_secret)
-
-log_info "Generating API key..."
-API_KEY=$(generate_secret)
-
-log_info "Generating NextAuth secret..."
-NEXTAUTH_SECRET=$(openssl rand -base64 32)
-
-log_info "Generating PostgreSQL password..."
-POSTGRES_PASSWORD=$(generate_password)
-
-log_info "Generating pgAdmin password..."
-PGADMIN_PASSWORD=$(generate_password)
-
-log_info "Generating Basic Auth credentials..."
-log_info "Traefik Dashboard:"
-TRAEFIK_BASIC_AUTH=$(generate_basic_auth)
-
-log_info "Flower:"
-FLOWER_BASIC_AUTH=$(generate_basic_auth)
-
-log_info "Mailpit:"
-MAILPIT_BASIC_AUTH=$(generate_basic_auth)
-
-log_info "pgAdmin:"
-PGADMIN_BASIC_AUTH=$(generate_basic_auth)
-
-log_success "Secrets generated"
-
-# ============================================
-# 6. Prompt for configuration
-# ============================================
-log_info "Step 6/10: Configuration..."
-
-read -p "Enter your APPLICATION domain [go.aivus.co]: " APP_DOMAIN
-APP_DOMAIN=${APP_DOMAIN:-go.aivus.co}
-
-read -p "Enter your SERVICE domain [aivus.co]: " SERVICE_DOMAIN
-SERVICE_DOMAIN=${SERVICE_DOMAIN:-aivus.co}
-
-read -p "Enter your email for Let's Encrypt [hi@aivus.co]: " ACME_EMAIL
-ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
-
-read -p "Enter your email for pgAdmin [hi@aivus.co]: " PGADMIN_EMAIL
-PGADMIN_EMAIL=${PGADMIN_EMAIL:-hi@aivus.co}
-
-read -p "Enter GCP Storage Bucket name [aivus-production-media]: " GCP_BUCKET_NAME
-GCP_BUCKET_NAME=${GCP_BUCKET_NAME:-aivus-production-media}
-
-# Optional: Google OAuth
-read -p "Do you have Google OAuth credentials? (y/n): " HAS_GOOGLE_OAUTH
-if [ "$HAS_GOOGLE_OAUTH" = "y" ]; then
-    read -p "Enter Google OAuth Client ID: " AUTH_GOOGLE_ID
-    read -p "Enter Google OAuth Client Secret: " AUTH_GOOGLE_SECRET
-else
-    AUTH_GOOGLE_ID=""
-    AUTH_GOOGLE_SECRET=""
-    log_warning "Google OAuth not configured. You can add it to .env later if needed."
-fi
-
-# Optional: Brevo API
-read -p "Do you have Brevo API key? (y/n): " HAS_BREVO
-if [ "$HAS_BREVO" = "y" ]; then
-    read -p "Enter Brevo API key: " BREVO_API_KEY
-else
-    BREVO_API_KEY=""
-    log_warning "Brevo API not configured. You can add it to .env later if needed."
-fi
-
-# Optional: Sentry
-read -p "Do you have Sentry DSN? (y/n): " HAS_SENTRY
-if [ "$HAS_SENTRY" = "y" ]; then
-    read -p "Enter Sentry DSN: " SENTRY_DSN
-else
-    SENTRY_DSN=""
-    log_warning "Sentry not configured. You can add it to .env later if needed."
+    # Optional: Brevo API
+    read -p "Do you have Brevo API key? (y/n): " HAS_BREVO
+    if [ "$HAS_BREVO" = "y" ]; then
+        read -p "Enter Brevo API key: " BREVO_API_KEY
+    else
+        BREVO_API_KEY=""
+        log_warning "Brevo API not configured. You can add it to .env later if needed."
+    fi
+    
+    # Optional: Sentry
+    read -p "Do you have Sentry DSN? (y/n): " HAS_SENTRY
+    if [ "$HAS_SENTRY" = "y" ]; then
+        read -p "Enter Sentry DSN: " SENTRY_DSN
+    else
+        SENTRY_DSN=""
+        log_warning "Sentry not configured. You can add it to .env later if needed."
+    fi
 fi
 
 # ============================================
-# 7. Create .env file
+# 8. Create .env file
 # ============================================
-log_info "Step 7/10: Creating .env file..."
+log_info "Step 8/10: Creating .env file..."
+
+# Backup existing .env if it exists
+if [ -f "$ENV_FILE" ] && [ "$EXISTING_INSTALL" = true ]; then
+    BACKUP_FILE="$HOME/aivus/.env.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$ENV_FILE" "$BACKUP_FILE"
+    log_success "Existing .env backed up to: $BACKUP_FILE"
+fi
 
 cat > $HOME/aivus/.env << EOF
 # ============================================
@@ -624,6 +1044,8 @@ FRONTEND_TAG=latest
 # ===========================================
 # DATABASE
 # ===========================================
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
 POSTGRES_DB=aivus
 POSTGRES_USER=aivus
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -696,9 +1118,16 @@ chmod 600 $HOME/aivus/.env
 log_success ".env file created at ~/aivus/.env"
 
 # ============================================
-# 8. Save credentials to file
+# 9. Save credentials to file
 # ============================================
-log_info "Step 8/10: Saving credentials..."
+log_info "Step 9/10: Saving credentials..."
+
+# Backup existing credentials if they exist
+if [ -f "$CREDENTIALS_FILE" ] && [ "$EXISTING_INSTALL" = true ]; then
+    BACKUP_CREDS="$HOME/aivus/CREDENTIALS.txt.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$CREDENTIALS_FILE" "$BACKUP_CREDS"
+    log_success "Existing credentials backed up to: $BACKUP_CREDS"
+fi
 
 cat > $HOME/aivus/CREDENTIALS.txt << EOF
 # ============================================
@@ -745,9 +1174,9 @@ chmod 600 $HOME/aivus/CREDENTIALS.txt
 log_success "Credentials saved to ~/aivus/CREDENTIALS.txt"
 
 # ============================================
-# 9. Setup GCP credentials
+# 10. Setup GCP credentials
 # ============================================
-log_info "Step 9/10: GCP credentials setup..."
+log_info "Step 10/10: GCP credentials setup..."
 
 log_warning "Please copy your GCP service account JSON to ~/data/gcp-credentials.json"
 log_info "Example: scp gcp-credentials.json user@server:~/data/"
@@ -755,16 +1184,16 @@ log_info "Example: scp gcp-credentials.json user@server:~/data/"
 read -p "Press Enter when you've copied the GCP credentials file..."
 
 if [ -f "$HOME/data/gcp-credentials.json" ]; then
-    chmod 600 "$HOME/data/gcp-credentials.json"
-    log_success "GCP credentials found and secured"
+    chmod 644 "$HOME/data/gcp-credentials.json"
+    log_success "GCP credentials found and permissions set (readable by containers)"
 else
     log_warning "GCP credentials not found. You'll need to add it later."
 fi
 
 # ============================================
-# 10. Configure GCP Docker authentication
+# 11. Configure GCP Docker authentication
 # ============================================
-log_info "Step 10/10: Configuring GCP Docker authentication..."
+log_info "Step 11/10: Configuring GCP Docker authentication..."
 
 if [ -f "$HOME/data/gcp-credentials.json" ]; then
     log_info "Activating service account..."
@@ -789,6 +1218,26 @@ echo "============================================"
 log_success "Installation completed!"
 echo "============================================"
 echo ""
+
+if [ "$EXISTING_INSTALL" = true ]; then
+    log_success "✅ Existing installation updated safely!"
+    echo ""
+    log_info "What was preserved:"
+    echo "  ✓ Database password (no need to recreate DB)"
+    echo "  ✓ Django secret keys"
+    echo "  ✓ API keys and HMAC secrets"
+    echo "  ✓ All authentication credentials"
+    echo ""
+    log_info "Backups created:"
+    if [ -n "$BACKUP_FILE" ]; then
+        echo "  - .env: $BACKUP_FILE"
+    fi
+    if [ -n "$BACKUP_CREDS" ]; then
+        echo "  - Credentials: $BACKUP_CREDS"
+    fi
+    echo ""
+fi
+
 log_info "Next steps:"
 echo ""
 echo "1. Review configuration:"
@@ -797,19 +1246,34 @@ echo ""
 echo "2. Review credentials:"
 echo "   cat ~/aivus/CREDENTIALS.txt"
 echo ""
-echo "3. Start services:"
-echo "   cd ~/aivus"
-echo "   docker compose -f docker-compose.production.yml up -d"
-echo ""
-echo "4. Initialize Django:"
-echo "   docker compose -f docker-compose.production.yml exec django python manage.py migrate"
-echo "   docker compose -f docker-compose.production.yml exec django python manage.py createsuperuser"
-echo ""
-echo "5. Check status:"
-echo "   docker compose -f docker-compose.production.yml ps"
-echo ""
-echo "6. View logs:"
-echo "   docker compose -f docker-compose.production.yml logs -f"
+
+if [ "$EXISTING_INSTALL" = true ]; then
+    echo "3. Restart services (if already running):"
+    echo "   cd ~/aivus"
+    echo "   docker compose -f docker-compose.production.yml down"
+    echo "   docker compose -f docker-compose.production.yml up -d"
+    echo ""
+    echo "4. Check status:"
+    echo "   docker compose -f docker-compose.production.yml ps"
+    echo ""
+    echo "5. View logs:"
+    echo "   docker compose -f docker-compose.production.yml logs -f"
+else
+    echo "3. Start services:"
+    echo "   cd ~/aivus"
+    echo "   docker compose -f docker-compose.production.yml up -d"
+    echo ""
+    echo "4. Initialize Django:"
+    echo "   docker compose -f docker-compose.production.yml exec django python manage.py migrate"
+    echo "   docker compose -f docker-compose.production.yml exec django python manage.py createsuperuser"
+    echo ""
+    echo "5. Check status:"
+    echo "   docker compose -f docker-compose.production.yml ps"
+    echo ""
+    echo "6. View logs:"
+    echo "   docker compose -f docker-compose.production.yml logs -f"
+fi
+
 echo ""
 log_info "Your application will be available at:"
 echo "  - Frontend: https://${APP_DOMAIN}"
