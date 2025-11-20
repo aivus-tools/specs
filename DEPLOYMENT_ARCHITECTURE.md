@@ -23,6 +23,7 @@
 └───────┬───────────────┬─────────────┬──────────────┬────────────────┘
         │               │             │              │
         │ /             │ /api/       │ /admin/      │ flower.domain
+        │ /api/auth/    │ (rest)      │              │
         │               │             │              │
 ┌───────▼──────┐ ┌──────▼──────┐ ┌───▼──────┐ ┌────▼──────┐
 │   FRONTEND   │ │   DJANGO    │ │  DJANGO  │ │  FLOWER   │
@@ -86,7 +87,18 @@ Django API (:5000)
 PostgreSQL / Redis
 ```
 
-### 2. API Request (Frontend → Backend)
+### 2. Auth Request (User → Next.js)
+```
+User Browser
+    ↓ HTTPS
+Traefik
+    ↓ /api/auth/* (High Priority)
+Next.js Frontend (:3000)
+    ↓
+NextAuth Handler
+```
+
+### 3. API Request (Frontend → Backend)
 ```
 Next.js Middleware
     ↓ Add HMAC signature

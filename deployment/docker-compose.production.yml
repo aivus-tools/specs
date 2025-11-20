@@ -328,3 +328,9 @@ services:
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.routers.frontend.priority=1"  # Lower priority than API/admin
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      # NextAuth routing (must have higher priority than Django API)
+      - "traefik.http.routers.frontend-auth.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/auth/`)"
+      - "traefik.http.routers.frontend-auth.entrypoints=websecure"
+      - "traefik.http.routers.frontend-auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.frontend-auth.priority=100"
+      - "traefik.http.routers.frontend-auth.service=frontend"
