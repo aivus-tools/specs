@@ -326,6 +326,7 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
+      SENTRY_DSN: ${SENTRY_DSN}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB}
@@ -336,7 +337,6 @@ services:
       BREVO_API_KEY: ${BREVO_API_KEY}
       DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-credentials.json
-      SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
@@ -573,9 +573,9 @@ if [ "$HAS_GOOGLE_OAUTH" = "y" ]; then
     read -p "Enter Google OAuth Client ID: " AUTH_GOOGLE_ID
     read -p "Enter Google OAuth Client Secret: " AUTH_GOOGLE_SECRET
 else
-    AUTH_GOOGLE_ID="your-google-client-id"
-    AUTH_GOOGLE_SECRET="your-google-client-secret"
-    log_warning "Google OAuth not configured. Update .env later."
+    AUTH_GOOGLE_ID=""
+    AUTH_GOOGLE_SECRET=""
+    log_warning "Google OAuth not configured. You can add it to .env later if needed."
 fi
 
 # Optional: Brevo API
@@ -583,8 +583,8 @@ read -p "Do you have Brevo API key? (y/n): " HAS_BREVO
 if [ "$HAS_BREVO" = "y" ]; then
     read -p "Enter Brevo API key: " BREVO_API_KEY
 else
-    BREVO_API_KEY="your-brevo-api-key"
-    log_warning "Brevo API not configured. Update .env later."
+    BREVO_API_KEY=""
+    log_warning "Brevo API not configured. You can add it to .env later if needed."
 fi
 
 # Optional: Sentry
@@ -592,8 +592,8 @@ read -p "Do you have Sentry DSN? (y/n): " HAS_SENTRY
 if [ "$HAS_SENTRY" = "y" ]; then
     read -p "Enter Sentry DSN: " SENTRY_DSN
 else
-    SENTRY_DSN="your-sentry-dsn"
-    log_warning "Sentry not configured. Update .env later."
+    SENTRY_DSN=""
+    log_warning "Sentry not configured. You can add it to .env later if needed."
 fi
 
 # ============================================
