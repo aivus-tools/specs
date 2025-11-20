@@ -41,6 +41,14 @@ curl -sSL https://raw.githubusercontent.com/ipolotsky/Aivus/main/Specs/deploymen
 ```
 *(Note: Replace the URL with the actual raw URL of your `install.sh` if different)*
 
+**What the script does:**
+- Installs/updates Docker to a compatible version (24.0.0+)
+- Installs Docker Compose
+- Generates secure passwords and Basic Auth credentials (with proper escaping for Traefik)
+- Creates docker-compose.production.yml with all services
+- Sets up Traefik with automatic SSL
+- Configures pgAdmin, Flower, Mailpit with Basic Auth protection
+
 ### Step 4: Follow the Prompts
 The script will ask for:
 1.  **Domain** (e.g., `aivus.co`)
@@ -106,11 +114,14 @@ Backups are stored in the `postgres_backups` volume and persist across container
 
 ## 5. Versions
 
+*   **Docker:** 24.0.0+ (auto-installed/updated by script)
 *   **Postgres:** 17
-*   **Traefik:** 3.5.3
+*   **Traefik:** 2.11 (stable, compatible with older Docker API)
 *   **Redis:** 7-alpine
 *   **Python:** 3.13
 *   **Node.js:** (as per frontend Dockerfile)
+
+**Note:** The install script automatically checks and updates Docker to version 24.0.0+ if needed. We use Traefik 2.11 for maximum compatibility.
 
 ## 6. Re-running the Installer
 

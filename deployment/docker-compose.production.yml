@@ -5,6 +5,7 @@ volumes:
   postgres_backups:
   redis_data:
   traefik_acme:
+  pgadmin_data:
 
 networks:
   aivus:
@@ -56,7 +57,7 @@ services:
     labels:
       - "traefik.enable=true"
       # Dashboard routing (optional, can be removed)
-      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${SERVICE_DOMAIN}`)"
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
       - "traefik.http.routers.traefik.service=api@internal"
@@ -85,6 +86,30 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ===========================================
+  # pgAdmin - Database Management
+  # ===========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: aivus_pgadmin
+    restart: unless-stopped
+    networks:
+      - aivus
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
 
   # ===========================================
   # Redis Cache & Celery Broker
@@ -134,9 +159,12 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
       
-      # Email (Brevo)
-      BREVO_API_KEY: ${BREVO_API_KEY}
-      BREVO_API_URL: ${BREVO_API_URL:-https://api.brevo.com/v3/}
+      # Email (SMTP via Mailpit for testing)
+      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+      EMAIL_HOST: mailpit
+      EMAIL_PORT: 1025
+      EMAIL_USE_TLS: "False"
+      EMAIL_USE_SSL: "False"
       DJANGO_DEFAULT_FROM_EMAIL: ${DJANGO_DEFAULT_FROM_EMAIL}
       DJANGO_SERVER_EMAIL: ${DJANGO_SERVER_EMAIL}
       
@@ -154,26 +182,32 @@ services:
       API_KEY: ${API_KEY}
       
       # Frontend URL
-      FRONTEND_URL: https://${DOMAIN}
+      FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       # Mount GCP credentials if using service account JSON
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
     labels:
       - "traefik.enable=true"
-      # API routing
-      - "traefik.http.routers.django-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/`)"
+      # API routing (highest priority)
+      - "traefik.http.routers.django-api.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/api/`)"
       - "traefik.http.routers.django-api.entrypoints=websecure"
       - "traefik.http.routers.django-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-api.priority=100"
+      - "traefik.http.routers.django-api.service=django-api"
       - "traefik.http.services.django-api.loadbalancer.server.port=5000"
-      # Admin routing
-      - "traefik.http.routers.django-admin.rule=Host(`${DOMAIN}`) && PathPrefix(`/${DJANGO_ADMIN_URL}`)"
+      # Admin routing (high priority)
+      - "traefik.http.routers.django-admin.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/${DJANGO_ADMIN_URL}`)"
       - "traefik.http.routers.django-admin.entrypoints=websecure"
       - "traefik.http.routers.django-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-admin.priority=90"
+      - "traefik.http.routers.django-admin.service=django-admin"
       - "traefik.http.services.django-admin.loadbalancer.server.port=5000"
-      # Static files routing
-      - "traefik.http.routers.django-static.rule=Host(`${DOMAIN}`) && PathPrefix(`/static/`, `/media/`)"
+      # Static files routing (high priority)
+      - "traefik.http.routers.django-static.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/static/`, `/media/`)"
       - "traefik.http.routers.django-static.entrypoints=websecure"
       - "traefik.http.routers.django-static.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-static.priority=80"
+      - "traefik.http.routers.django-static.service=django-static"
       - "traefik.http.services.django-static.loadbalancer.server.port=5000"
 
   # ===========================================
@@ -204,7 +238,7 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
-      FRONTEND_URL: https://${DOMAIN}
+      FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
 
@@ -259,7 +293,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.flower.rule=Host(`flower.${DOMAIN}`)"
+      - "traefik.http.routers.flower.rule=Host(`flower.${SERVICE_DOMAIN}`)"
       - "traefik.http.routers.flower.entrypoints=websecure"
       - "traefik.http.routers.flower.tls.certresolver=letsencrypt"
       - "traefik.http.services.flower.loadbalancer.server.port=5555"
@@ -268,7 +302,7 @@ services:
       - "traefik.http.middlewares.flower-auth.basicauth.users=${FLOWER_BASIC_AUTH}"
 
   # ===========================================
-  # Mailpit - Email Testing (Optional, only for staging)
+  # Mailpit - Email Testing (Always enabled for development)
   # ===========================================
   mailpit:
     image: axllent/mailpit:latest
@@ -276,11 +310,9 @@ services:
     restart: unless-stopped
     networks:
       - aivus
-    profiles:
-      - staging  # Only start with --profile staging
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mailpit.rule=Host(`mailpit.${DOMAIN}`)"
+      - "traefik.http.routers.mailpit.rule=Host(`mailpit.${SERVICE_DOMAIN}`)"
       - "traefik.http.routers.mailpit.entrypoints=websecure"
       - "traefik.http.routers.mailpit.tls.certresolver=letsencrypt"
       - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
@@ -305,7 +337,7 @@ services:
       
       # API Connection
       API_URL: http://django:5000
-      CALLBACK_URL: https://${DOMAIN}
+      CALLBACK_URL: https://${APP_DOMAIN}
       
       # NextAuth
       AUTH_SECRET: ${NEXTAUTH_SECRET}
@@ -324,13 +356,13 @@ services:
     labels:
       - "traefik.enable=true"
       # Main app routing (catch-all, should be last)
-      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.frontend.rule=Host(`${APP_DOMAIN}`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.routers.frontend.priority=1"  # Lower priority than API/admin
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
       # NextAuth routing (must have higher priority than Django API)
-      - "traefik.http.routers.frontend-auth.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/auth/`)"
+      - "traefik.http.routers.frontend-auth.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/api/auth/`)"
       - "traefik.http.routers.frontend-auth.entrypoints=websecure"
       - "traefik.http.routers.frontend-auth.tls.certresolver=letsencrypt"
       - "traefik.http.routers.frontend-auth.priority=100"

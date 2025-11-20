@@ -54,13 +54,33 @@ fi
 log_info "Starting Aivus installation..."
 
 # ============================================
-# 1. Install Docker
+# 1. Install/Update Docker
 # ============================================
-log_info "Step 1/10: Installing Docker..."
+log_info "Step 1/10: Installing/Updating Docker..."
+
+# Minimum required Docker version for Traefik 3.x (API 1.44)
+MIN_DOCKER_VERSION="24.0.0"
+CURRENT_DOCKER_VERSION=""
 
 if command -v docker &> /dev/null; then
-    log_success "Docker is already installed"
-    docker --version
+    CURRENT_DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "0.0.0")
+    log_info "Current Docker version: $CURRENT_DOCKER_VERSION"
+    
+    # Compare versions (simple comparison, works for most cases)
+    if [ "$(printf '%s\n' "$MIN_DOCKER_VERSION" "$CURRENT_DOCKER_VERSION" | sort -V | head -n1)" = "$MIN_DOCKER_VERSION" ]; then
+        log_success "Docker version is sufficient (>= $MIN_DOCKER_VERSION)"
+    else
+        log_warning "Docker version is too old (< $MIN_DOCKER_VERSION)"
+        log_info "Updating Docker to latest version..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        $SUDO sh get-docker.sh
+        rm get-docker.sh
+        log_success "Docker updated successfully"
+        
+        # Restart Docker to apply changes
+        $SUDO systemctl restart docker || true
+        sleep 3
+    fi
 else
     log_info "Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
@@ -69,6 +89,11 @@ else
     rm get-docker.sh
     log_success "Docker installed successfully"
 fi
+
+# Display final version
+FINAL_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
+log_info "Docker version: $FINAL_VERSION"
+log_info "Docker API version: $(docker version --format '{{.Server.APIVersion}}' 2>/dev/null || echo "unknown")"
 
 # ============================================
 # 2. Install Docker Compose
@@ -121,7 +146,7 @@ services:
   # Traefik - Reverse Proxy & SSL
   # ===========================================
   traefik:
-    image: traefik:3.5.3
+    image: traefik:v2.11
     container_name: aivus_traefik
     restart: unless-stopped
     networks:
@@ -237,9 +262,12 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
       
-      # Email (Brevo)
-      BREVO_API_KEY: ${BREVO_API_KEY}
-      BREVO_API_URL: ${BREVO_API_URL:-https://api.brevo.com/v3/}
+      # Email (SMTP via Mailpit for testing)
+      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+      EMAIL_HOST: mailpit
+      EMAIL_PORT: 1025
+      EMAIL_USE_TLS: "False"
+      EMAIL_USE_SSL: "False"
       DJANGO_DEFAULT_FROM_EMAIL: ${DJANGO_DEFAULT_FROM_EMAIL}
       DJANGO_SERVER_EMAIL: ${DJANGO_SERVER_EMAIL}
       
@@ -263,20 +291,26 @@ services:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
     labels:
       - "traefik.enable=true"
-      # API routing
+      # API routing (highest priority)
       - "traefik.http.routers.django-api.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/api/`)"
       - "traefik.http.routers.django-api.entrypoints=websecure"
       - "traefik.http.routers.django-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-api.priority=100"
+      - "traefik.http.routers.django-api.service=django-api"
       - "traefik.http.services.django-api.loadbalancer.server.port=5000"
-      # Admin routing
+      # Admin routing (high priority)
       - "traefik.http.routers.django-admin.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/${DJANGO_ADMIN_URL}`)"
       - "traefik.http.routers.django-admin.entrypoints=websecure"
       - "traefik.http.routers.django-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-admin.priority=90"
+      - "traefik.http.routers.django-admin.service=django-admin"
       - "traefik.http.services.django-admin.loadbalancer.server.port=5000"
-      # Static files routing
+      # Static files routing (high priority)
       - "traefik.http.routers.django-static.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/static/`, `/media/`)"
       - "traefik.http.routers.django-static.entrypoints=websecure"
       - "traefik.http.routers.django-static.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.django-static.priority=80"
+      - "traefik.http.routers.django-static.service=django-static"
       - "traefik.http.services.django-static.loadbalancer.server.port=5000"
 
   # ===========================================
@@ -389,7 +423,7 @@ services:
       - "traefik.http.middlewares.flower-auth.basicauth.users=${FLOWER_BASIC_AUTH}"
 
   # ===========================================
-  # Mailpit - Email Testing (Optional, only for staging)
+  # Mailpit - Email Testing (Always enabled for development)
   # ===========================================
   mailpit:
     image: axllent/mailpit:latest
@@ -397,8 +431,6 @@ services:
     restart: unless-stopped
     networks:
       - aivus
-    profiles:
-      - staging  # Only start with --profile staging
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.mailpit.rule=Host(`mailpit.${SERVICE_DOMAIN}`)"
@@ -832,35 +864,42 @@ fi
 # ============================================
 # 6. Generate or load secrets
 # ============================================
+
+# Define helper functions (used in both new and existing installations)
+generate_secret() {
+    openssl rand -hex 32
+}
+
+generate_password() {
+    openssl rand -base64 32 | tr -d '=+/' | cut -c1-25
+}
+
+generate_django_secret() {
+    openssl rand -base64 50 | tr -d '=+/' | cut -c1-50
+}
+
+generate_basic_auth() {
+    local username="admin"
+    local password=$(openssl rand -base64 12 | tr -d '=+/')
+    local hash=""
+    
+    # Try to use htpasswd (native or via Docker)
+    if command -v htpasswd &> /dev/null; then
+        hash=$(htpasswd -nb "$username" "$password")
+    else
+        # Use Docker to generate htpasswd hash
+        hash=$(docker run --rm httpd:alpine htpasswd -nb "$username" "$password" 2>/dev/null)
+    fi
+    
+    # Escape $ for docker-compose ($ -> $$)
+    # This is critical for Traefik to parse the hash correctly
+    echo "$hash" | sed 's/\$/\$\$/g'
+    
+    echo "# Username: $username, Password: $password" >&2
+}
+
 if [ "$EXISTING_INSTALL" = false ]; then
     log_info "Step 6/10: Generating secrets..."
-    
-    generate_secret() {
-        openssl rand -hex 32
-    }
-    
-    generate_password() {
-        openssl rand -base64 32 | tr -d '=+/' | cut -c1-25
-    }
-    
-    generate_django_secret() {
-        openssl rand -base64 50 | tr -d '=+/' | cut -c1-50
-    }
-    
-    generate_basic_auth() {
-        local username="admin"
-        local password=$(openssl rand -base64 12 | tr -d '=+/')
-        
-        # Check if htpasswd is available
-        if command -v htpasswd &> /dev/null; then
-            echo $(htpasswd -nb "$username" "$password")
-        else
-            log_warning "htpasswd not found, using plain password"
-            echo "$username:$password"
-        fi
-        
-        echo "# Username: $username, Password: $password" >&2
-    }
     
     log_info "Generating Django secret key..."
     DJANGO_SECRET_KEY=$(generate_django_secret)
@@ -897,6 +936,23 @@ if [ "$EXISTING_INSTALL" = false ]; then
 else
     log_info "Step 6/10: Using existing secrets..."
     log_success "Secrets loaded from existing .env"
+    
+    # Always regenerate Basic Auth credentials (they don't affect database)
+    log_info "Regenerating Basic Auth credentials (safe, doesn't affect database)..."
+    
+    log_info "Traefik Dashboard:"
+    TRAEFIK_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "Flower:"
+    FLOWER_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "Mailpit:"
+    MAILPIT_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_info "pgAdmin:"
+    PGADMIN_BASIC_AUTH=$(generate_basic_auth)
+    
+    log_success "Basic Auth credentials regenerated"
 fi
 
 # ============================================

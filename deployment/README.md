@@ -435,9 +435,7 @@ docker compose -f docker-compose.production.yml restart
 
 ## 📚 Дополнительные ресурсы
 
-- **🔒 Безопасная переустановка:** `SAFE_REINSTALL.md` (ВАЖНО!)
-- **🔧 Troubleshooting:** `TROUBLESHOOTING.md` (Решение проблем)
-- **📋 Шпаргалка:** `CHEATSHEET.md` (Быстрые команды)
+- **🔐 Basic Auth Fix:** `BASIC_AUTH_FIX.md` (Решение проблемы с htpasswd)
 - **Основная документация:** `/Specs/DEPLOYMENT.md`
 - **Переменные окружения:** `/Specs/ENV_VARIABLES.md`
 - **Архитектура:** `/Specs/DEPLOYMENT_ARCHITECTURE.md`
