@@ -158,6 +158,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_acme:/letsencrypt
       - $HOME/aivus/traefik.yml:/etc/traefik/traefik.yml:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"
 
   # ===========================================
   # PostgreSQL Database
@@ -244,6 +252,9 @@ services:
     command: /start
     environment:
       # Django Core
+      DJANGO_DEBUG: True
+      DEBUG: True
+      DJANGO_DEBUG_TOOLBAR: True
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django
