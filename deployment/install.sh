@@ -291,27 +291,11 @@ services:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
     labels:
       - "traefik.enable=true"
-      # API routing (highest priority)
-      - "traefik.http.routers.django-api.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/api/`)"
-      - "traefik.http.routers.django-api.entrypoints=websecure"
-      - "traefik.http.routers.django-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.django-api.priority=100"
-      - "traefik.http.routers.django-api.service=django-api"
-      - "traefik.http.services.django-api.loadbalancer.server.port=5000"
-      # Admin routing (high priority)
-      - "traefik.http.routers.django-admin.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/${DJANGO_ADMIN_URL}`)"
-      - "traefik.http.routers.django-admin.entrypoints=websecure"
-      - "traefik.http.routers.django-admin.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.django-admin.priority=90"
-      - "traefik.http.routers.django-admin.service=django-admin"
-      - "traefik.http.services.django-admin.loadbalancer.server.port=5000"
-      # Static files routing (high priority)
-      - "traefik.http.routers.django-static.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/static/`, `/media/`)"
-      - "traefik.http.routers.django-static.entrypoints=websecure"
-      - "traefik.http.routers.django-static.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.django-static.priority=80"
-      - "traefik.http.routers.django-static.service=django-static"
-      - "traefik.http.services.django-static.loadbalancer.server.port=5000"
+      # Django on api.aivus.co - all routes (API, Admin, Static)
+      - "traefik.http.routers.django.rule=Host(`api.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.django.entrypoints=websecure"
+      - "traefik.http.routers.django.tls.certresolver=letsencrypt"
+      - "traefik.http.services.django.loadbalancer.server.port=5000"
 
   # ===========================================
   # Celery Worker
@@ -412,6 +396,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
+      BREVO_API_KEY: ${BREVO_API_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.flower.rule=Host(`flower.${SERVICE_DOMAIN}`)"
@@ -476,18 +462,11 @@ services:
       DEBUG: ${FRONTEND_DEBUG:-false}
     labels:
       - "traefik.enable=true"
-      # Main app routing (catch-all, should be last)
+      # Frontend on go.aivus.co - all routes
       - "traefik.http.routers.frontend.rule=Host(`${APP_DOMAIN}`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.frontend.priority=1"  # Lower priority than API/admin
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
-      # NextAuth routing (must have higher priority than Django API)
-      - "traefik.http.routers.frontend-auth.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/api/auth/`)"
-      - "traefik.http.routers.frontend-auth.entrypoints=websecure"
-      - "traefik.http.routers.frontend-auth.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.frontend-auth.priority=100"
-      - "traefik.http.routers.frontend-auth.service=frontend"
 EOF
 
 
