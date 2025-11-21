@@ -1054,6 +1054,16 @@ fi
 # ============================================
 log_info "Step 8/10: Creating .env file..."
 
+# Ensure PGADMIN_PASSWORD is set (critical for pgAdmin)
+if [ -z "${PGADMIN_PASSWORD:-}" ]; then
+    if [ -n "${PGADMIN_DEFAULT_PASSWORD:-}" ]; then
+        PGADMIN_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
+    else
+        PGADMIN_PASSWORD=$(generate_password)
+        log_warning "PGADMIN_PASSWORD was not set, generated new password"
+    fi
+fi
+
 # Backup existing .env if it exists
 if [ -f "$ENV_FILE" ] && [ "$EXISTING_INSTALL" = true ]; then
     BACKUP_FILE="$HOME/aivus/.env.backup.$(date +%Y%m%d_%H%M%S)"
