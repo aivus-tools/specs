@@ -246,7 +246,7 @@ services:
       # Django Core
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN}
+      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django
       DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
       DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-True}
       
@@ -908,30 +908,10 @@ if [ "$EXISTING_INSTALL" = false ]; then
     log_info "Mailpit:"
     MAILPIT_BASIC_AUTH=$(generate_basic_auth)
     
-    log_info "pgAdmin:"
-    PGADMIN_BASIC_AUTH=$(generate_basic_auth)
-    
     log_success "Secrets generated"
 else
     log_info "Step 6/10: Using existing secrets..."
     log_success "Secrets loaded from existing .env"
-    
-    # Always regenerate Basic Auth credentials (they don't affect database)
-    log_info "Regenerating Basic Auth credentials (safe, doesn't affect database)..."
-    
-    log_info "Traefik Dashboard:"
-    TRAEFIK_BASIC_AUTH=$(generate_basic_auth)
-    
-    log_info "Flower:"
-    FLOWER_BASIC_AUTH=$(generate_basic_auth)
-    
-    log_info "Mailpit:"
-    MAILPIT_BASIC_AUTH=$(generate_basic_auth)
-    
-    log_info "pgAdmin:"
-    PGADMIN_BASIC_AUTH=$(generate_basic_auth)
-    
-    log_success "Basic Auth credentials regenerated"
 fi
 
 # ============================================
@@ -1107,8 +1087,8 @@ API_KEY=${API_KEY}
 # ===========================================
 # DJANGO CONFIGURATION
 # ===========================================
-DJANGO_ALLOWED_HOSTS=${APP_DOMAIN},www.${APP_DOMAIN}
-DJANGO_ADMIN_URL=admin-$(openssl rand -hex 8)/
+DJANGO_ALLOWED_HOSTS=api.${SERVICE_DOMAIN},django
+DJANGO_ADMIN_URL=admin/
 DJANGO_SECURE_SSL_REDIRECT=True
 
 # ===========================================
@@ -1151,7 +1131,6 @@ FRONTEND_DEBUG=false
 TRAEFIK_BASIC_AUTH=${TRAEFIK_BASIC_AUTH}
 FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH}
 MAILPIT_BASIC_AUTH=${MAILPIT_BASIC_AUTH}
-PGADMIN_BASIC_AUTH=${PGADMIN_BASIC_AUTH}
 EOF
 
 chmod 600 $HOME/aivus/.env
@@ -1188,7 +1167,7 @@ Email: ${PGADMIN_EMAIL}
 Password: ${PGADMIN_PASSWORD}
 
 ## Django Admin
-URL: https://${APP_DOMAIN}/$(grep DJANGO_ADMIN_URL $HOME/aivus/.env | cut -d'=' -f2)
+URL: https://api.${SERVICE_DOMAIN}/admin/
 # Create superuser with: docker compose exec django python manage.py createsuperuser
 
 ## Traefik Dashboard
@@ -1319,7 +1298,7 @@ echo ""
 log_info "Your application will be available at:"
 echo "  - Frontend: https://${APP_DOMAIN}"
 echo "  - API: https://${APP_DOMAIN}/api/v1/"
-echo "  - Admin: https://${APP_DOMAIN}/$(grep DJANGO_ADMIN_URL $HOME/aivus/.env | cut -d'=' -f2)"
+echo "  - Admin: https://api.${SERVICE_DOMAIN}/admin/"
 echo "  - pgAdmin: https://pgadmin.${SERVICE_DOMAIN}"
 echo "  - Flower: https://flower.${SERVICE_DOMAIN}"
 echo "  - Mailpit: https://mailpit.${SERVICE_DOMAIN}"
