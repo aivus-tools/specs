@@ -945,6 +945,14 @@ if [ "$EXISTING_INSTALL" = true ]; then
         ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
         GCP_BUCKET_NAME=${DJANGO_GCP_STORAGE_BUCKET_NAME:-aivus-production-media}
         
+        # Ensure PGADMIN_PASSWORD is set (might not exist in old .env)
+        if [ -z "$PGADMIN_DEFAULT_PASSWORD" ]; then
+            PGADMIN_PASSWORD=$(generate_password)
+            log_warning "PGADMIN_DEFAULT_PASSWORD was empty, generated new password"
+        else
+            PGADMIN_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
+        fi
+        
         # Ensure BREVO_API_KEY has a value (Django requires it)
         if [ -z "$BREVO_API_KEY" ]; then
             BREVO_API_KEY="dummy-key-not-configured"
