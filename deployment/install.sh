@@ -456,6 +456,7 @@ services:
       # API Connection
       API_URL: http://django:5000
       CALLBACK_URL: https://${APP_DOMAIN}
+      NEXTAUTH_URL: https://${APP_DOMAIN}
       
       # NextAuth
       AUTH_SECRET: ${NEXTAUTH_SECRET}
