@@ -974,6 +974,12 @@ if [ "$EXISTING_INSTALL" = true ]; then
         PGADMIN_EMAIL=${PGADMIN_DEFAULT_EMAIL:-hi@aivus.co}
         ACME_EMAIL=${ACME_EMAIL:-hi@aivus.co}
         GCP_BUCKET_NAME=${DJANGO_GCP_STORAGE_BUCKET_NAME:-aivus-production-media}
+        
+        # Ensure BREVO_API_KEY has a value (Django requires it)
+        if [ -z "$BREVO_API_KEY" ]; then
+            BREVO_API_KEY="dummy-key-not-configured"
+            log_warning "BREVO_API_KEY was empty, set to dummy value"
+        fi
     else
         log_info "Updating configuration..."
         read -p "Enter your APPLICATION domain [${APP_DOMAIN}]: " NEW_APP_DOMAIN
@@ -1051,8 +1057,8 @@ else
     if [ "$HAS_BREVO" = "y" ]; then
         read -p "Enter Brevo API key: " BREVO_API_KEY
     else
-        BREVO_API_KEY=""
-        log_warning "Brevo API not configured. You can add it to .env later if needed."
+        BREVO_API_KEY="dummy-key-not-configured"
+        log_warning "Brevo API not configured. Using dummy value. You can add real key to .env later if needed."
     fi
     
     # Optional: Sentry
