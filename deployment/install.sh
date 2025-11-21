@@ -451,7 +451,7 @@ services:
       - django
     environment:
       # Next.js
-      NODE_ENV: production
+      NODE_ENV: development
       
       # API Connection
       API_URL: http://django:5000
@@ -1142,7 +1142,7 @@ AUTH_GOOGLE_SECRET=${AUTH_GOOGLE_SECRET}
 # FRONTEND
 # ===========================================
 NEXT_PUBLIC_LOCALE=en
-FRONTEND_DEBUG=false
+FRONTEND_DEBUG=true
 
 # ===========================================
 # BASIC AUTH (htpasswd format)
