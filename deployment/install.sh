@@ -239,7 +239,7 @@ services:
   # Django Backend
   # ===========================================
   django:
-    image: ${GCP_REGISTRY}/backend:${BACKEND_TAG:-latest}
+    image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_django
     restart: unless-stopped
     networks:
@@ -312,7 +312,7 @@ services:
   # Celery Worker
   # ===========================================
   celeryworker:
-    image: ${GCP_REGISTRY}/backend:${BACKEND_TAG:-latest}
+    image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_celeryworker
     restart: unless-stopped
     networks:
@@ -350,7 +350,7 @@ services:
   # Celery Beat (Scheduler)
   # ===========================================
   celerybeat:
-    image: ${GCP_REGISTRY}/backend:${BACKEND_TAG:-latest}
+    image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_celerybeat
     restart: unless-stopped
     networks:
@@ -387,7 +387,7 @@ services:
   # Flower - Celery Monitoring
   # ===========================================
   flower:
-    image: ${GCP_REGISTRY}/backend:${BACKEND_TAG:-latest}
+    image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_flower
     restart: unless-stopped
     networks:
@@ -442,7 +442,7 @@ services:
   # Next.js Frontend
   # ===========================================
   frontend:
-    image: ${GCP_REGISTRY}/frontend:${FRONTEND_TAG:-latest}
+    image: ghcr.io/aivus-tools/frontend:${FRONTEND_TAG:-latest}
     container_name: aivus_frontend
     restart: unless-stopped
     networks:
@@ -1088,7 +1088,6 @@ ACME_EMAIL=${ACME_EMAIL}
 # ===========================================
 # DOCKER REGISTRY
 # ===========================================
-GCP_REGISTRY=us-central1-docker.pkg.dev/pioneering-flag-476313-u2/aivus
 BACKEND_TAG=latest
 FRONTEND_TAG=latest
 
@@ -1240,25 +1239,8 @@ else
     log_warning "GCP credentials not found. You'll need to add it later."
 fi
 
-# ============================================
-# 11. Configure GCP Docker authentication
-# ============================================
-log_info "Step 11/10: Configuring GCP Docker authentication..."
-
-if [ -f "$HOME/data/gcp-credentials.json" ]; then
-    log_info "Activating service account..."
-    gcloud auth activate-service-account --key-file="$HOME/data/gcp-credentials.json"
-    
-    log_info "Configuring Docker for GCP..."
-    gcloud auth configure-docker us-central1-docker.pkg.dev
-    
-    log_success "GCP authentication configured"
-else
-    log_warning "Skipping GCP authentication (credentials not found)"
-    log_info "You'll need to run these commands manually:"
-    echo "  gcloud auth activate-service-account --key-file=$HOME/data/gcp-credentials.json"
-    echo "  gcloud auth configure-docker us-central1-docker.pkg.dev"
-fi
+# GCP Docker authentication removed - using GHCR now.
+# GHCR login is handled by CI/CD pipeline during deploy.
 
 # ============================================
 # Summary
