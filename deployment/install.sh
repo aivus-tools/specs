@@ -294,7 +294,10 @@ services:
       # HMAC & API
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
-      
+
+      # OpenAI
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
       # Frontend URL
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
@@ -342,6 +345,7 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
@@ -380,6 +384,7 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
 
