@@ -472,9 +472,6 @@ services:
       # HMAC (must match Django)
       HMAC_SECRET: ${HMAC_SECRET}
       
-      # Locale
-      NEXT_PUBLIC_LOCALE: ${NEXT_PUBLIC_LOCALE:-en}
-      
       # Debug
       DEBUG: ${FRONTEND_DEBUG:-false}
     labels:
@@ -1156,7 +1153,6 @@ AUTH_GOOGLE_SECRET=${AUTH_GOOGLE_SECRET}
 # ===========================================
 # FRONTEND
 # ===========================================
-NEXT_PUBLIC_LOCALE=en
 FRONTEND_DEBUG=true
 
 # ===========================================
