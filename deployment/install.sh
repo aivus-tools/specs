@@ -295,14 +295,19 @@ services:
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
 
-      # OpenAI
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # LLM (Vertex AI / Gemini)
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
       # Frontend URL
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       # Mount GCP credentials if using service account JSON
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
+      - ${VERTEX_CREDENTIALS_PATH}:/app/vertex-credentials.json:ro
     labels:
       - "traefik.enable=true"
       # Django on api.aivus.co - all routes (API, Admin, Static)
@@ -345,10 +350,15 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
+      - ${VERTEX_CREDENTIALS_PATH}:/app/vertex-credentials.json:ro
 
   # ===========================================
   # Celery Beat (Scheduler)
@@ -384,9 +394,14 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
+      - ${VERTEX_CREDENTIALS_PATH}:/app/vertex-credentials.json:ro
 
   # ===========================================
   # Flower - Celery Monitoring
