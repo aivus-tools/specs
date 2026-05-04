@@ -113,7 +113,7 @@ fi
 # ============================================
 log_info "Step 3/10: Creating directories..."
 
-mkdir -p $HOME/data/{postgres,postgres-backups,pgadmin,pgbackups,redis,traefik}
+mkdir -p $HOME/data/{postgres,pgadmin,redis,traefik,databasus}
 mkdir -p $HOME/aivus
 
 log_success "Directories created"
@@ -132,10 +132,10 @@ version: '3.9'
 
 volumes:
   postgres_data:
-  postgres_backups:
   redis_data:
   traefik_acme:
   pgadmin_data:
+  databasus_data:
 
 networks:
   aivus:
@@ -178,8 +178,6 @@ services:
       - aivus
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - postgres_backups:/backups
-      - $HOME/aivus/maintenance:/usr/local/bin/maintenance:ro
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -273,12 +271,7 @@ services:
       # Redis
       REDIS_URL: redis://redis:6379/0
       
-      # Email (SMTP via Mailpit for testing)
-      EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
-      EMAIL_HOST: mailpit
-      EMAIL_PORT: 1025
-      EMAIL_USE_TLS: "False"
-      EMAIL_USE_SSL: "False"
+      # Email (Resend via anymail; production.py hard-codes EMAIL_BACKEND)
       DJANGO_DEFAULT_FROM_EMAIL: ${DJANGO_DEFAULT_FROM_EMAIL}
       DJANGO_SERVER_EMAIL: ${DJANGO_SERVER_EMAIL}
       
@@ -440,23 +433,28 @@ services:
       - "traefik.http.middlewares.flower-auth.basicauth.users=${FLOWER_BASIC_AUTH}"
 
   # ===========================================
-  # Mailpit - Email Testing (Always enabled for development)
+  # Databasus - PostgreSQL Backup & Monitoring
   # ===========================================
-  mailpit:
-    image: axllent/mailpit:latest
-    container_name: aivus_mailpit
+  databasus:
+    image: databasus/databasus:v3.32.2
+    container_name: aivus_databasus
     restart: unless-stopped
     networks:
       - aivus
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - databasus_data:/databasus-data
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mailpit.rule=Host(`mailpit.${SERVICE_DOMAIN}`)"
-      - "traefik.http.routers.mailpit.entrypoints=websecure"
-      - "traefik.http.routers.mailpit.tls.certresolver=letsencrypt"
-      - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
-      # Basic auth for Mailpit
-      - "traefik.http.routers.mailpit.middlewares=mailpit-auth"
-      - "traefik.http.middlewares.mailpit-auth.basicauth.users=${MAILPIT_BASIC_AUTH}"
+      - "traefik.http.routers.databasus.rule=Host(`databasus.${SERVICE_DOMAIN}`)"
+      - "traefik.http.routers.databasus.entrypoints=websecure"
+      - "traefik.http.routers.databasus.tls.certresolver=letsencrypt"
+      - "traefik.http.services.databasus.loadbalancer.server.port=4005"
+      # Note: traefik basic auth NOT used here — Databasus is a SPA that makes
+      # background API calls without an Authorization header, which traefik
+      # would 401 and the UI would loop. Auth is enforced by the app itself.
 
   # ===========================================
   # Next.js Frontend
@@ -546,241 +544,6 @@ sed -i.bak "s/ACME_EMAIL_PLACEHOLDER/${ACME_EMAIL}/" $HOME/aivus/traefik.yml
 rm $HOME/aivus/traefik.yml.bak
 
 log_success "traefik.yml created"
-
-# Create maintenance scripts directory
-log_info "Creating Postgres maintenance scripts..."
-mkdir -p $HOME/aivus/maintenance/_sourced
-
-# Create constants.sh
-cat > $HOME/aivus/maintenance/_sourced/constants.sh << 'EOF'
-#!/usr/bin/env bash
-
-
-BACKUP_DIR_PATH='/backups'
-BACKUP_FILE_PREFIX='backup'
-EOF
-
-# Create messages.sh
-cat > $HOME/aivus/maintenance/_sourced/messages.sh << 'EOF'
-#!/usr/bin/env bash
-
-
-message_newline() {
-    echo
-}
-
-message_debug()
-{
-    echo -e "DEBUG: ${@}"
-}
-
-message_welcome()
-{
-    echo -e "\e[1m${@}\e[0m"
-}
-
-message_warning()
-{
-    echo -e "\e[33mWARNING\e[0m: ${@}"
-}
-
-message_error()
-{
-    echo -e "\e[31mERROR\e[0m: ${@}"
-}
-
-message_info()
-{
-    echo -e "\e[37mINFO\e[0m: ${@}"
-}
-
-message_suggestion()
-{
-    echo -e "\e[33mSUGGESTION\e[0m: ${@}"
-}
-
-message_success()
-{
-    echo -e "\e[32mSUCCESS\e[0m: ${@}"
-}
-EOF
-
-# Create backup script
-cat > $HOME/aivus/maintenance/backup << 'EOF'
-#!/usr/bin/env bash
-
-
-### Create a database backup.
-###
-### Usage:
-###     $ docker compose -f <environment>.yml (exec |run --rm) postgres backup
-
-
-set -o errexit
-set -o pipefail
-set -o nounset
-
-
-working_dir="$(dirname ${0})"
-source "${working_dir}/_sourced/constants.sh"
-source "${working_dir}/_sourced/messages.sh"
-
-
-message_welcome "Backing up the '${POSTGRES_DB}' database..."
-
-
-if [[ "${POSTGRES_USER}" == "postgres" ]]; then
-    message_error "Backing up as 'postgres' user is not supported. Assign 'POSTGRES_USER' env with another one and try again."
-    exit 1
-fi
-
-export PGHOST="${POSTGRES_HOST}"
-export PGPORT="${POSTGRES_PORT}"
-export PGUSER="${POSTGRES_USER}"
-export PGPASSWORD="${POSTGRES_PASSWORD}"
-export PGDATABASE="${POSTGRES_DB}"
-
-backup_filename="${BACKUP_FILE_PREFIX}_$(date +'%Y_%m_%dT%H_%M_%S').sql.gz"
-pg_dump | gzip > "${BACKUP_DIR_PATH}/${backup_filename}"
-
-
-message_success "'${POSTGRES_DB}' database backup '${backup_filename}' has been created and placed in '${BACKUP_DIR_PATH}'."
-EOF
-
-# Create restore script
-cat > $HOME/aivus/maintenance/restore << 'EOF'
-#!/usr/bin/env bash
-
-
-### Restore database from a backup.
-###
-### Parameters:
-###     <1> filename of an existing backup.
-###
-### Usage:
-###     $ docker compose -f <environment>.yml (exec |run --rm) postgres restore <1>
-
-
-set -o errexit
-set -o pipefail
-set -o nounset
-
-
-working_dir="$(dirname ${0})"
-source "${working_dir}/_sourced/constants.sh"
-source "${working_dir}/_sourced/messages.sh"
-
-
-if [[ -z ${1+x} ]]; then
-    message_error "Backup filename is not specified yet it is a required parameter. Make sure you provide one and try again."
-    exit 1
-fi
-backup_filename="${BACKUP_DIR_PATH}/${1}"
-if [[ ! -f "${backup_filename}" ]]; then
-    message_error "No backup with the specified filename found. Check out the 'backups' maintenance script output to see if there is one and try again."
-    exit 1
-fi
-
-message_welcome "Restoring the '${POSTGRES_DB}' database from the '${backup_filename}' backup..."
-
-if [[ "${POSTGRES_USER}" == "postgres" ]]; then
-    message_error "Restoring as 'postgres' user is not supported. Assign 'POSTGRES_USER' env with another one and try again."
-    exit 1
-fi
-
-export PGHOST="${POSTGRES_HOST}"
-export PGPORT="${POSTGRES_PORT}"
-export PGUSER="${POSTGRES_USER}"
-export PGPASSWORD="${POSTGRES_PASSWORD}"
-export PGDATABASE="${POSTGRES_DB}"
-
-message_info "Dropping the database..."
-dropdb "${PGDATABASE}"
-
-message_info "Creating a new database..."
-createdb --owner="${POSTGRES_USER}"
-
-message_info "Applying the backup to the new database..."
-gunzip -c "${backup_filename}" | psql "${POSTGRES_DB}"
-
-message_success "The '${POSTGRES_DB}' database has been restored from the '${backup_filename}' backup."
-EOF
-
-# Create backups script
-cat > $HOME/aivus/maintenance/backups << 'EOF'
-#!/usr/bin/env bash
-
-
-### View backups.
-###
-### Usage:
-###     $ docker compose -f <environment>.yml (exec |run --rm) postgres backups
-
-
-set -o errexit
-set -o pipefail
-set -o nounset
-
-
-working_dir="$(dirname ${0})"
-source "${working_dir}/_sourced/constants.sh"
-source "${working_dir}/_sourced/messages.sh"
-
-
-message_welcome "These are the backups you have got:"
-
-ls -lht "${BACKUP_DIR_PATH}"
-EOF
-
-# Create rmbackup script
-cat > $HOME/aivus/maintenance/rmbackup << 'EOF'
-#!/usr/bin/env bash
-
-### Remove a database backup.
-###
-### Parameters:
-###     <1> filename of a backup to remove.
-###
-### Usage:
-###     $ docker-compose -f <environment>.yml (exec |run --rm) postgres rmbackup <1>
-
-
-set -o errexit
-set -o pipefail
-set -o nounset
-
-
-working_dir="$(dirname ${0})"
-source "${working_dir}/_sourced/constants.sh"
-source "${working_dir}/_sourced/messages.sh"
-
-
-if [[ -z ${1+x} ]]; then
-    message_error "Backup filename is not specified yet it is a required parameter. Make sure you provide one and try again."
-    exit 1
-fi
-backup_filename="${BACKUP_DIR_PATH}/${1}"
-if [[ ! -f "${backup_filename}" ]]; then
-    message_error "No backup with the specified filename found. Check out the 'backups' maintenance script output to see if there is one and try again."
-    exit 1
-fi
-
-message_welcome "Removing the '${backup_filename}' backup file..."
-
-rm -r "${backup_filename}"
-
-message_success "The '${backup_filename}' database backup has been removed."
-EOF
-
-# Make scripts executable
-chmod +x $HOME/aivus/maintenance/backup
-chmod +x $HOME/aivus/maintenance/restore
-chmod +x $HOME/aivus/maintenance/backups
-chmod +x $HOME/aivus/maintenance/rmbackup
-chmod +x $HOME/aivus/maintenance/_sourced/constants.sh
-chmod +x $HOME/aivus/maintenance/_sourced/messages.sh
-
-log_success "Maintenance scripts created and made executable"
 
 # ============================================
 # 5. Check for existing installation
@@ -933,9 +696,6 @@ if [ "$EXISTING_INSTALL" = false ]; then
     
     log_info "Flower:"
     FLOWER_BASIC_AUTH=$(generate_basic_auth)
-    
-    log_info "Mailpit:"
-    MAILPIT_BASIC_AUTH=$(generate_basic_auth)
     
     log_success "Secrets generated"
 else
@@ -1175,7 +935,6 @@ FRONTEND_DEBUG=true
 # ===========================================
 TRAEFIK_BASIC_AUTH=${TRAEFIK_BASIC_AUTH}
 FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH}
-MAILPIT_BASIC_AUTH=${MAILPIT_BASIC_AUTH}
 EOF
 
 chmod 600 $HOME/aivus/.env
@@ -1223,9 +982,11 @@ $(echo "${TRAEFIK_BASIC_AUTH}" | grep "Username:" || echo "Check .env for creden
 URL: https://flower.${SERVICE_DOMAIN}
 $(echo "${FLOWER_BASIC_AUTH}" | grep "Username:" || echo "Check .env for credentials")
 
-## Mailpit (Email Testing)
-URL: https://mailpit.${SERVICE_DOMAIN}
-$(echo "${MAILPIT_BASIC_AUTH}" | grep "Username:" || echo "Check .env for credentials")
+## Databasus (PostgreSQL Backups)
+URL: https://databasus.${SERVICE_DOMAIN}
+# Auth: built into the app — sign up admin on first visit (no traefik basic auth).
+# Postgres connection inside Docker network: host=postgres port=5432 db=${POSTGRES_DB} user=${POSTGRES_USER}
+# Configure backup schedule, storage (S3/GCS HMAC, GDrive) and notifications via web UI on first run.
 
 ## Secrets
 HMAC_SECRET: ${HMAC_SECRET}
@@ -1329,7 +1090,7 @@ echo "  - API: https://${APP_DOMAIN}/api/v1/"
 echo "  - Admin: https://api.${SERVICE_DOMAIN}/admin/"
 echo "  - pgAdmin: https://pgadmin.${SERVICE_DOMAIN}"
 echo "  - Flower: https://flower.${SERVICE_DOMAIN}"
-echo "  - Mailpit: https://mailpit.${SERVICE_DOMAIN}"
+echo "  - Databasus: https://databasus.${SERVICE_DOMAIN}"
 echo "  - Traefik: https://traefik.${SERVICE_DOMAIN}"
 echo ""
 log_warning "IMPORTANT: Keep ~/aivus/CREDENTIALS.txt secure!"
