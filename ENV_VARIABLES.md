@@ -87,10 +87,20 @@ SENTRY_DSN=<your-sentry-dsn>
 
 ### 9. GCP Service Account Credentials
 ```bash
-GCP_CREDENTIALS_PATH=/path/to/service-account-key.json
+# JSON ключи runtime сервис-аккаунта sa-for-vertex-ai@pioneering-flag-476313-u2.iam.gserviceaccount.com
+VERTEX_CREDENTIALS_PATH=/app/vertex-credentials.json   # Vertex Gemini + Speech-to-Text
+GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-credentials.json  # GCS (аттачменты, финальные документы)
+GOOGLE_CLOUD_PROJECT=pioneering-flag-476313-u2
+GOOGLE_CLOUD_LOCATION=us-central1                       # для Vertex Gemini
+GOOGLE_CLOUD_SPEECH_LOCATION=global                     # опционально, дефолт global
 ```
-**Где:** Django (для GCS storage)  
-**Как получить:** См. `GCP_SETUP.md`
+**Где:** Django, Celery worker, Celery beat (все три контейнера должны видеть креденшалы)
+**Как получить:** См. `GCP_SETUP.md`. Для STT — отдельный раздел "Runtime: APIs и роли" в том же файле.
+
+**Минимум для голосового ввода работает:**
+- API `speech.googleapis.com` включён в проекте.
+- На SA назначена роль `roles/speech.client` (даёт `speech.recognizers.recognize`).
+- `STT_DEV_FAKE=1` чтобы вернуть фейковый текст без вызова GCP (полезно для CI и локальной разработки без креденшалов).
 
 ### 10. Basic Auth для админ-панелей
 ```bash

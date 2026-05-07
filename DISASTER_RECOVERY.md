@@ -10,7 +10,7 @@
 |---|---|---|
 | `prod.env` | 38 переменных, секреты (`POSTGRES_PASSWORD`, `DJANGO_SECRET_KEY`, `HMAC_SECRET`, `NEXTAUTH_SECRET`, OAuth, Brevo, Sentry...) | новый сервер не подымется без идентичных секретов |
 | `gcp-credentials.json` | GCP service account `gha-service-account@pioneering-flag-476313-u2` | GCS storage для медиа, Databasus HMAC-ключи |
-| `vertex-credentials.json` | GCP SA для Vertex AI / Gemini | Brief AI v3 — без него LLM не работает |
+| `vertex-credentials.json` | GCP SA `sa-for-vertex-ai@pioneering-flag-476313-u2` для Vertex AI / Gemini / Speech-to-Text | Brief AI v3 чат + голосовой ввод. На SA должны быть включены: API `aiplatform.googleapis.com` + `speech.googleapis.com`, роли `roles/aiplatform.user` + `roles/speech.client`. Подробности в `Specs/GCP_SETUP.md` → "Runtime: APIs и роли". |
 | `docker-config.ghcr.json` | GHCR PAT для pull `ghcr.io/aivus-tools/*` | образы backend/frontend приватные |
 | `CREDENTIALS.txt` | человекочитаемые URL и логины | удобно подсмотреть пароли pgAdmin/Flower |
 

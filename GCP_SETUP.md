@@ -285,6 +285,79 @@ gcloud iam service-accounts keys create ~/gcp-key-new.json \
 - [ ] Локальный тест прошел успешно
 - [ ] GitHub Actions запущены и работают
 - [ ] Образы видны в GCP Console
+- [ ] Runtime APIs включены в проекте (см. ниже)
+- [ ] Runtime сервис-аккаунту назначены роли для Vertex / Speech / GCS
+
+---
+
+## 🛠️ Runtime: APIs и роли для бэкенда
+
+Эти настройки нужны **runtime сервис-аккаунту** (тот, что подключается к Django через `VERTEX_CREDENTIALS_PATH` / `GOOGLE_APPLICATION_CREDENTIALS`). Текущий аккаунт: `sa-for-vertex-ai@pioneering-flag-476313-u2.iam.gserviceaccount.com`.
+
+При перестройке проекта с нуля (новый GCP-проект, миграция, DR) каждый шаг ниже обязателен — без него соответствующая фича упадёт с `403 SERVICE_DISABLED` или `403 IAM_PERMISSION_DENIED`.
+
+### Включить APIs
+
+```bash
+PROJECT=pioneering-flag-476313-u2
+
+gcloud services enable aiplatform.googleapis.com --project=$PROJECT      # Vertex AI / Gemini (Brief AI v3)
+gcloud services enable speech.googleapis.com --project=$PROJECT          # Speech-to-Text (голосовой ввод в чате брифа)
+gcloud services enable storage.googleapis.com --project=$PROJECT         # GCS (хранение аттачментов и финальных доков)
+gcloud services enable iamcredentials.googleapis.com --project=$PROJECT  # для signed URLs если используются
+```
+
+После `enable` ждать ~1-2 минуты пока пропагация дойдёт до бэкенда.
+
+### Назначить роли runtime сервис-аккаунту
+
+```bash
+SA=sa-for-vertex-ai@$PROJECT.iam.gserviceaccount.com
+
+# Vertex AI / Gemini — для Brief AI v3 чата
+gcloud projects add-iam-policy-binding $PROJECT \
+    --member="serviceAccount:$SA" --role="roles/aiplatform.user"
+
+# Speech-to-Text — для голосового ввода (Chirp 3)
+gcloud projects add-iam-policy-binding $PROJECT \
+    --member="serviceAccount:$SA" --role="roles/speech.client"
+
+# GCS — для аттачментов брифов и финальных документов
+gcloud projects add-iam-policy-binding $PROJECT \
+    --member="serviceAccount:$SA" --role="roles/storage.objectAdmin"
+```
+
+`roles/speech.client` (Cloud Speech User) даёт `speech.recognizers.recognize` — без него `client.recognize()` в [aivus_backend/projects/stt.py](../Backend/aivus_backend/aivus_backend/projects/stt.py) вернёт 403 и фронт получит 500 на `/transcribe`.
+
+### Speech-to-Text: location, recognizer и модель
+
+- **По умолчанию**: synthetic recognizer `_` + локация `global` (endpoint `speech.googleapis.com`) + модель `chirp_2` (multilingual, поддерживает phrase hints). Это работает из коробки, отдельный recognizer создавать не надо.
+- **Chirp 3** (новее, точнее): доступна **только** в региональных локациях `us-central1` / `europe-west4`. В `global` её нет — Google вернёт `400 model "chirp_3" does not exist in the location named "global"`. Synthetic `_` recognizer в этих регионах часто отдаёт `404` — для использования Chirp 3 нужно создать explicit recognizer:
+  ```bash
+  gcloud speech recognizers create aivus-chirp3 \
+    --location=us-central1 \
+    --model=chirp_3 \
+    --language-codes=en-US,ru-RU \
+    --project=pioneering-flag-476313-u2
+  ```
+  И в env: `GOOGLE_CLOUD_SPEECH_LOCATION=us-central1`, `STT_RECOGNIZER=aivus-chirp3`, `STT_MODEL=chirp_3`. Это TODO — текущий код использует `_` recognizer.
+- **Переопределение модели**: `STT_MODEL=chirp_2` (default) или другая (`latest_long`, `latest_short`). `latest_short` хорошо для аудио ≤60 сек, дешевле и быстрее.
+
+### Smoke-тест что всё работает
+
+```bash
+# В контейнере django
+docker exec aivus_backend_local_django python manage.py shell -c "
+from aivus_backend.projects import stt
+import os; os.environ['STT_DEV_FAKE'] = '0'
+print(stt._get_speech_client())
+"
+```
+
+Ошибки которые могут вылезти при пропуске шагов:
+- `PermissionDenied: 403 ... API has not been used in project ... or it is disabled` — забыл `gcloud services enable speech.googleapis.com`.
+- `PermissionDenied: 403 Permission 'speech.recognizers.recognize' denied on resource` — забыл `roles/speech.client` для SA.
+- `MethodNotImplemented: 501 Received http2 header with status: 404` — `_` recognizer недоступен в выбранной локации; вернись на `global`.
 
 ---
 
