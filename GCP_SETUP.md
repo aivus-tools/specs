@@ -331,8 +331,9 @@ gcloud projects add-iam-policy-binding $PROJECT \
 
 ### Speech-to-Text: location, recognizer и модель
 
-- **По умолчанию**: synthetic recognizer `_` + локация `global` (endpoint `speech.googleapis.com`) + модель `chirp_2` (multilingual, поддерживает phrase hints). Это работает из коробки, отдельный recognizer создавать не надо.
-- **Chirp 3** (новее, точнее): доступна **только** в региональных локациях `us-central1` / `europe-west4`. В `global` её нет — Google вернёт `400 model "chirp_3" does not exist in the location named "global"`. Synthetic `_` recognizer в этих регионах часто отдаёт `404` — для использования Chirp 3 нужно создать explicit recognizer:
+- **По умолчанию**: synthetic recognizer `_` + локация `global` (endpoint `speech.googleapis.com`) + модель `short`. Это работает из коробки, отдельный recognizer создавать не надо. Модель `short` хорошо подходит к нашему лимиту `MAX_AUDIO_DURATION_SEC=60` ([Backend/aivus_backend/aivus_backend/projects/stt.py](../Backend/aivus_backend/aivus_backend/projects/stt.py)) — дешевле и быстрее, чем `long`/`chirp_2`.
+- **Какие модели валидны в `global`**: `short`, `long`, `telephony`. Семейства `chirp` и `chirp_2`/`chirp_3` в `global` **не существуют**, попытка их использовать вернёт `400 The model "<name>" does not exist in the location named "global"`. `chirp_2` работает в региональном `global`-эндпоинте через synthetic `_` recognizer только если явно указать локацию `global` и модель `chirp_2` — но тогда теряется поддержка некоторых фич; в проде у нас выбран `short`.
+- **Chirp 3** (новее, точнее): доступна **только** в региональных локациях `us-central1` / `europe-west4`. В `global` её нет. Synthetic `_` recognizer в этих регионах часто отдаёт `404` — для использования Chirp 3 нужно создать explicit recognizer:
   ```bash
   gcloud speech recognizers create aivus-chirp3 \
     --location=us-central1 \
@@ -341,7 +342,7 @@ gcloud projects add-iam-policy-binding $PROJECT \
     --project=pioneering-flag-476313-u2
   ```
   И в env: `GOOGLE_CLOUD_SPEECH_LOCATION=us-central1`, `STT_RECOGNIZER=aivus-chirp3`, `STT_MODEL=chirp_3`. Это TODO — текущий код использует `_` recognizer.
-- **Переопределение модели**: `STT_MODEL=chirp_2` (default) или другая (`latest_long`, `latest_short`). `latest_short` хорошо для аудио ≤60 сек, дешевле и быстрее.
+- **Переопределение модели**: `STT_MODEL=short` (default) или другая (`long`, `latest_long`, `latest_short`, `chirp_2` для региональных локаций). `short` оптимально для аудио ≤60 сек.
 
 ### Smoke-тест что всё работает
 
@@ -358,6 +359,7 @@ print(stt._get_speech_client())
 - `PermissionDenied: 403 ... API has not been used in project ... or it is disabled` — забыл `gcloud services enable speech.googleapis.com`.
 - `PermissionDenied: 403 Permission 'speech.recognizers.recognize' denied on resource` — забыл `roles/speech.client` для SA.
 - `MethodNotImplemented: 501 Received http2 header with status: 404` — `_` recognizer недоступен в выбранной локации; вернись на `global`.
+- `InvalidArgument: 400 The model "chirp" does not exist in the location named "global"` — попытка использовать `chirp` (или `chirp_2`/`chirp_3`) в `global`. В `global` валидны только `short`/`long`/`telephony`. Поставь `STT_MODEL=short` (или `long`) либо переключись на региональный `GOOGLE_CLOUD_SPEECH_LOCATION=us-central1` с подходящей моделью.
 
 ---
 

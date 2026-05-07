@@ -92,7 +92,8 @@ VERTEX_CREDENTIALS_PATH=/app/vertex-credentials.json   # Vertex Gemini + Speech-
 GOOGLE_APPLICATION_CREDENTIALS=/app/gcs-credentials.json  # GCS (аттачменты, финальные документы)
 GOOGLE_CLOUD_PROJECT=pioneering-flag-476313-u2
 GOOGLE_CLOUD_LOCATION=us-central1                       # для Vertex Gemini
-GOOGLE_CLOUD_SPEECH_LOCATION=global                     # опционально, дефолт global
+GOOGLE_CLOUD_SPEECH_LOCATION=global                     # для STT, дефолт global
+STT_MODEL=short                                         # дефолт short (валидна в global; chirp/chirp_2 — НЕТ)
 ```
 **Где:** Django, Celery worker, Celery beat (все три контейнера должны видеть креденшалы)
 **Как получить:** См. `GCP_SETUP.md`. Для STT — отдельный раздел "Runtime: APIs и роли" в том же файле.

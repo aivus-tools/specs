@@ -170,6 +170,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
+
       # Frontend URL
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
@@ -223,6 +227,10 @@ services:
       VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
@@ -267,6 +275,10 @@ services:
       VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
       - ${VERTEX_CREDENTIALS_PATH}:/app/vertex-credentials.json:ro
