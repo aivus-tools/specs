@@ -118,7 +118,7 @@ docker compose -f docker-compose.production.yml up -d
 **Через UI Databasus** (проще):
 
 1. Открыть `https://databasus.aivus.co`, зарегистрировать админа (UI попросит на первом заходе).
-2. Подключить storage (GCS bucket `aivus-db-backups` через S3 HMAC) — параметры есть в `infra_databasus.md` memory.
+2. Подключить storage: GCS bucket `aivus-db-backups`, S3 HMAC от CI SA `gha-service-account@pioneering-flag-476313-u2`. HMAC access/secret keys выписываются в GCP Console → Storage → Settings → Interoperability.
 3. Подключить database `postgres:5432` (host=postgres, db/user/password из `.env`).
 4. В разделе **Backups** найти последний бэкап → **Restore** → выбрать целевую базу.
 
@@ -172,7 +172,7 @@ docker compose -f docker-compose.production.yml restart django celeryworker cele
 | `AUTH_GOOGLE_SECRET` | новый client secret в Google Cloud Console → обновить `.env` → recreate frontend |
 | GCP service account JSON | revoke в GCP IAM, выпустить новый, перезалить `gcp-credentials.json`/`vertex-credentials.json`, recreate django+celery+frontend |
 | GHCR PAT | revoke на github, выпустить новый scope `read:packages`, перезалить `~/.docker/config.json` |
-| Databasus admin | в UI поменять пароль; basic auth у traefik для этого сервиса не используется — см. `infra_databasus.md` |
+| Databasus admin | в UI поменять пароль; basic auth у traefik для этого сервиса не используется — авторизация через сам Databasus |
 
 После любой смены: пересоздать секрет-бэкап локально (`scp .env`, обновить `prod.env`).
 
