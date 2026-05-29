@@ -55,6 +55,7 @@
 |---|---|---|---|
 | `HMAC_SECRET` | секрет | django + celery + frontend | `openssl rand -hex 32` — должен совпадать на django и frontend |
 | `API_KEY` | секрет | django + celery | `openssl rand -hex 24` |
+| `WIX_WEBHOOK_SECRET` | секрет | django | `openssl rand -hex 32` — общий секрет вебхука Wix-формы (`X-Aivus-Webhook-Secret`); пустой выключает эндпоинт `/api/v1/public/briefs/ai/from-wix` (401) |
 
 ## NextAuth (frontend)
 
