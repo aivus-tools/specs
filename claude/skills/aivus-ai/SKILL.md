@@ -9,27 +9,27 @@ description: "Use ALWAYS for AI/LLM work in Aivus: modifying core/llm.py, ai_bri
 
 Если задача затрагивает Django-код (models, views, tasks) — вызови ещё `aivus-backend`.
 
-## Главный контекст — миграция v2 -> v3 в процессе
+## Главный контекст — Brief AI v3 (актуальная архитектура)
 
-**Approved 2026-04-17**, breaking change: все существующие briefs будут удалены миграцией.
+Миграция v2 -> v3 **завершена** (approved 2026-04-17, breaking change: старые briefs удалены миграцией). LangGraph выпилен, v3 в проде. История миграции — в `Specs/archive/`.
 
-Что выкидывается:
+Что выпилено вместе с v2 (не воскрешать):
 - LangGraph (router -> generate -> update -> answer -> extract граф)
 - 9 hard-coded HTML секций (`BRIEF_SECTION_KEYS`)
 - Модель `BriefMethodology`
 - Hard-coded промпты в `ai_brief_v2.py`
 
-Что появляется:
-- Единый chat endpoint без графа
+Что есть в v3:
+- Единый chat endpoint без графа (`projects/ai_brief_v3.py`: `process_brief_turn`, `generate_final_documents`, `generate_brief_title`)
 - `BriefPrompt` модель — slug-based (`main_system_prompt`, `finalization_prompt`, `master_brief_template`, `archetypes_reference`), versioned, редактируется через TinyMCE в Django admin
 - `BriefAttachment` — файлы в GCS, multimodal в Gemini через `Part.from_uri()`
 - `BriefFinalDocument` — 3 финальных артефакта (Production Brief, Vendor Email, Deliverables Checklist)
 - Free-form text вместо HTML секций, структуру задаёт LLM, не код
 
 **Источники истины** (читай при любой AI-задаче):
-- `AI_REFACTORING_PLAN.md` — полный план миграции, 6 фаз
 - `memory/project_brief_v3.md` — PO decisions (2026-04-17)
-- `AI_ANALYSIS.md` — аудит v2 с 15 багами, что НЕ должны повторять в v3
+- `Specs/BRIEF_ARCHITECTURAL_DEBT.md` — актуальный архитектурный долг brief flow (P0/P1/P2) и regression checklist
+- `Specs/archive/AI_REFACTORING_PLAN.md` — история миграции (6 фаз); `Specs/archive/AI_ANALYSIS.md` — аудит v2 с багами, что НЕ повторять в v3
 
 ## LLM клиент (`core/llm.py`)
 
@@ -51,7 +51,7 @@ response = client.generate(model, messages, attachments=attachments)
 - `DEFAULT_MODEL = "gemini-3.1-pro-preview"` — генерация
 - `TITLE_MODEL = "gemini-2.5-flash"` — заголовки
 
-OPENAI_API_KEY должен быть **во всех Django и Celery контейнерах** на проде (см. `HANDOFF.md`).
+OPENAI_API_KEY должен быть **во всех Django и Celery контейнерах** на проде (см. `Specs/ENV_VARIABLES.md`).
 
 ## Промпты — в БД, не в коде
 
@@ -87,7 +87,7 @@ Tasks в `projects/tasks.py`:
 
 ## V2 баги — НЕ повторять в v3
 
-Из `AI_ANALYSIS.md`:
+Из `Specs/archive/AI_ANALYSIS.md`:
 
 1. `_persist_traces()` копия в `projects/tasks.py:18` и `projects/api/views_brief_v2.py:54` — в v3 одна функция в одном модуле
 2. `_CYRILLIC_RE` определён дважды (lines 781 и 1037) с разными паттернами — одна регулярка в utils

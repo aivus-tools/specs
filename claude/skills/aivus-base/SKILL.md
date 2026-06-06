@@ -28,11 +28,11 @@ AIVUS — SaaS для автоматизации RFP в video production. Две
 1. Определи домен: frontend / backend / AI / инфра / cross-cutting
 2. Если frontend / backend / AI — обязательно вызови соответствующий специализированный скилл (`aivus-frontend`, `aivus-backend`, `aivus-ai`) дополнительно к этому базовому
 3. Подтяни нужные файлы:
-   - AI-задачи — `AI_REFACTORING_PLAN.md` и `memory/project_brief_v3.md` (v2→v3 миграция в процессе)
-   - Инфра / деплой / локализация — `HANDOFF.md` и `memory/infra_*.md`
+   - AI-задачи — `memory/project_brief_v3.md`, `Backend/aivus_backend/aivus_backend/projects/ai_brief_v3.py`, `Specs/BRIEF_ARCHITECTURAL_DEBT.md`
+   - Инфра / деплой / локализация — `Specs/DEPLOYMENT.md`, `Specs/ENV_VARIABLES.md`, `memory/infra_*.md`
    - Архитектура моделей — `Specs/ARCHITECTURE.md`
    - Команды разработки — `DEVELOPMENT.md` или `make help`
-4. **Не читай** `Specs/CURRENT_STATUS.md` — устарел на 6+ месяцев
+   - История AI рефакторинга v2→v3 (завершён) — `Specs/archive/`
 
 ## Workflow
 
@@ -86,11 +86,11 @@ AIVUS — SaaS для автоматизации RFP в video production. Две
 |---|---|
 | Продукт, стек, текущее состояние | `memory/MEMORY.md` и файлы рядом |
 | Модели данных и архитектура | `Specs/ARCHITECTURE.md` |
-| In-progress AI рефакторинг | `AI_REFACTORING_PLAN.md` + `memory/project_brief_v3.md` |
-| Аудит v2 (что фиксится v3) | `AI_ANALYSIS.md` |
-| Инфра, локализация, прод | `HANDOFF.md`, `memory/infra_databasus.md`, `memory/infra_stt.md` |
+| AI brief v3 (актуальное) | `memory/project_brief_v3.md`, `Backend/aivus_backend/aivus_backend/projects/ai_brief_v3.py` |
+| Brief flow: архитектурный долг | `Specs/BRIEF_ARCHITECTURAL_DEBT.md` |
+| История AI рефакторинга v2→v3 (завершён) | `Specs/archive/AI_REFACTORING_PLAN.md`, `Specs/archive/AI_ANALYSIS.md` |
+| Инфра, локализация, прод | `Specs/DEPLOYMENT.md`, `Specs/ENV_VARIABLES.md`, `memory/infra_databasus.md`, `memory/infra_stt.md` |
 | Команды разработки | `DEVELOPMENT.md`, `make help` |
-| **Устарел, не читать** | `Specs/CURRENT_STATUS.md` (заморожен на 2025-11-15) |
 
 ## Общие анти-паттерны
 

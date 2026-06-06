@@ -435,12 +435,12 @@ docker compose -f docker-compose.production.yml restart
 
 ## 📚 Дополнительные ресурсы
 
-- **🔐 Basic Auth Fix:** `BASIC_AUTH_FIX.md` (Решение проблемы с htpasswd)
 - **Основная документация:** `/Specs/DEPLOYMENT.md`
 - **Переменные окружения:** `/Specs/ENV_VARIABLES.md`
-- **Архитектура:** `/Specs/DEPLOYMENT_ARCHITECTURE.md`
+- **Архитектура:** `/Specs/ARCHITECTURE.md`
 - **GCP Setup:** `/Specs/GCP_SETUP.md`
-- **Быстрый старт:** `/Specs/QUICK_DEPLOY.md`
+- **Восстановление прода:** `/Specs/DISASTER_RECOVERY.md`
+- **Роутинг (Traefik):** `/Specs/deployment/ROUTING.md`
 
 ---
 

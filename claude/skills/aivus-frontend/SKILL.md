@@ -260,7 +260,7 @@ export const EN_LOCALES = {
 
 SSR через middleware → header `x-locale` → `await headers()` в layout. На клиенте `getLocale()` читает cookie.
 
-**Не возвращай** `NEXT_PUBLIC_LOCALE` в окружение Docker — locale per-request. См. `HANDOFF.md`.
+**Не возвращай** `NEXT_PUBLIC_LOCALE` в окружение Docker — locale per-request. См. `Specs/archive/HANDOFF.md`.
 
 Все видимые пользователю строки — через `t('KEY')`. Хардкод запрещён.
 

@@ -57,6 +57,17 @@
 | `API_KEY` | секрет | django + celery | `openssl rand -hex 24` |
 | `WIX_WEBHOOK_SECRET` | секрет | django | `openssl rand -hex 32` — общий секрет вебхука Wix-формы (`X-Aivus-Webhook-Secret`); пустой выключает эндпоинт `/api/v1/public/briefs/ai/from-wix` (401) |
 
+## E2E (только staging, НЕ прод)
+
+Включают test-only эндпоинт `/api/v1/auth/e2e-confirmation-token`, который отдаёт последний email-confirmation токен по адресу, чтобы staging E2E подтверждал регистрацию без чтения почты. По умолчанию выключен (404). **Никогда не включать в проде.**
+
+| Переменная | Категория | Где | Как генерировать |
+|---|---|---|---|
+| `E2E_CONFIRMATION_TOKEN_ENABLED` | флаг | django | `True` только на staging; по умолчанию `False`. Включает эндпоинт |
+| `E2E_CONFIRMATION_TOKEN_SECRET` | секрет | django | `openssl rand -hex 32` — проверяется заголовком `X-E2E-Token-Secret`; пустой даёт 403 даже при включённом флаге |
+
+Изменение этих env требует пересоздания контейнера (`docker compose up -d django`), не `docker restart` (тот не перечитывает env_file). На фронте E2E переключается `E2E_TOKEN_SOURCE=endpoint` + тот же `E2E_CONFIRMATION_TOKEN_SECRET`; по умолчанию `mailpit`.
+
 ## NextAuth (frontend)
 
 | Переменная | Категория | Где | Как генерировать |
