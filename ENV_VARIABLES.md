@@ -64,9 +64,10 @@
 | Переменная | Категория | Где | Как генерировать |
 |---|---|---|---|
 | `E2E_CONFIRMATION_TOKEN_ENABLED` | флаг | django | `True` только на staging; по умолчанию `False`. Включает эндпоинт |
-| `E2E_CONFIRMATION_TOKEN_SECRET` | секрет | django | `openssl rand -hex 32` — проверяется заголовком `X-E2E-Token-Secret`; пустой даёт 403 даже при включённом флаге |
+| `E2E_CONFIRMATION_TOKEN_SECRET` | секрет | django | `openssl rand -hex 32` — проверяется заголовком `X-E2E-Token-Secret`; пустой или неверный даёт 404 (неотличимо от выключенного) |
+| `SENTRY_ENVIRONMENT` | маркер | django | для staging выставить в не-`production` значение (`staging`). `production.py` при `SENTRY_ENVIRONMENT == production` (или unset, default `production`) принудительно выключает эндпоинт независимо от флага |
 
-Изменение этих env требует пересоздания контейнера (`docker compose up -d django`), не `docker restart` (тот не перечитывает env_file). На фронте E2E переключается `E2E_TOKEN_SOURCE=endpoint` + тот же `E2E_CONFIRMATION_TOKEN_SECRET`; по умолчанию `mailpit`.
+Защита от прода двойная: флаг по умолчанию `False`, плюс `production.py` форсит выключение, если `SENTRY_ENVIRONMENT` не выставлен в не-`production`. То есть на staging эндпоинт работает только когда И `E2E_CONFIRMATION_TOKEN_ENABLED=True`, И `SENTRY_ENVIRONMENT=staging`. Изменение этих env требует пересоздания контейнера (`docker compose up -d django`), не `docker restart` (тот не перечитывает env_file). На фронте E2E переключается `E2E_TOKEN_SOURCE=endpoint` + тот же `E2E_CONFIRMATION_TOKEN_SECRET`; по умолчанию `mailpit`.
 
 ## NextAuth (frontend)
 

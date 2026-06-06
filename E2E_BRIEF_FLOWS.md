@@ -63,6 +63,8 @@ cd Frontend && npx playwright test brief-flows/wix-webhook.spec.ts --project=bri
    ```
 4. После проверки вернуть эндпоинт в выключенное состояние (убрать строки и пересоздать контейнер).
 
+Локально прод-гард не мешает: эндпоинт под `config.settings.local`, а форс-выключение живёт в `production.py`. На staging (там работает `production.py`) дополнительно нужен `SENTRY_ENVIRONMENT=staging` — иначе `production.py` принудительно выключит эндпоинт даже при `E2E_CONFIRMATION_TOKEN_ENABLED=True`. Неверный/пустой секрет и выключенный флаг дают одинаковый 404.
+
 ## Переменные окружения
 
 | Переменная | По умолчанию | Назначение |
@@ -89,7 +91,7 @@ Workflow `Frontend/.github/workflows/e2e-flows.yml`, только `workflow_disp
 build -> deploy-staging -> e2e-flows (staging) -> deploy-prod -> smoke (prod, лёгкий)
 ```
 
-На staging confirm-флоу работает либо через Mailpit (пустой `RESEND_API_KEY`), либо через `E2E_TOKEN_SOURCE=endpoint` с включённым на staging эндпоинтом - тогда раннеру достаточно HTTPS и заголовка с секретом, Mailpit наружу светить не нужно.
+На staging confirm-флоу работает либо через Mailpit (пустой `RESEND_API_KEY`), либо через `E2E_TOKEN_SOURCE=endpoint` с включённым на staging эндпоинтом - тогда раннеру достаточно HTTPS и заголовка с секретом, Mailpit наружу светить не нужно. Для режима endpoint на staging-бэкенде нужно `E2E_CONFIRMATION_TOKEN_ENABLED=True`, секрет и `SENTRY_ENVIRONMENT=staging` (иначе прод-гард в `production.py` выключит эндпоинт).
 
 Секреты для workflow: `STAGING_URL`, `STAGING_BACKEND_URL`, `STAGING_WIX_SECRET`, `STAGING_CLIENT_EMAIL`, `STAGING_CLIENT_PASSWORD`, `STAGING_E2E_TOKEN_SECRET`.
 
