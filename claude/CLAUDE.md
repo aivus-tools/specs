@@ -11,6 +11,22 @@
 
 Специализированные скиллы автоматически подгружают `aivus-base`. Для мультидоменных задач (например "добавь поле в Brief и выведи во frontend") триггерится несколько скиллов одновременно.
 
+Дополнительно подключены инженерные скиллы Мэтта Покока (`mattpocock/skills`): `grill-me`, `grill-with-docs` (сверка плана с доменом, CONTEXT.md, ADR), `zoom-out` (контекст незнакомого кода), `to-prd`, `to-issues` (PRD и нарезка на вертикальные слайсы). Setup-конфиг — `setup-matt-pocock-skills`.
+
+## Agent skills
+
+### Issue tracker
+
+Задачи ведутся в ClickUp, workspace VILKA, только через обёртку `scripts/clickup`. Три рабочих листа: Conceptualization (проработка/PRD), Development (реализация), Bug Tracking (баги). Полный флоу — `Specs/DEV_PROCESS.md`. Конфиг — `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Лейблов нет — triage кодируется статусами листа (разные у Dev plan и Bug Tracking). См. `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. Источники истины — `Specs/PRODUCT_VISION.md`, `Specs/DEV_PROCESS.md` и `Specs/*`. См. `docs/agents/domain.md`.
+
 ## Bash Safety
 
 Bash-команды разрешены без подтверждений, но строго в рамках проекта:
