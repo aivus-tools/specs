@@ -112,6 +112,17 @@ def cmd_lists(_args: argparse.Namespace) -> None:
     out({"team": TEAM_ID, "default": DEFAULT_LIST, "lists": LISTS, "statuses": STATUSES})
 
 
+def cmd_members(args: argparse.Namespace) -> None:
+    # The narrow guest token sees no members via /team, so read them off a list
+    # everyone shares instead (assignable people who can access the board).
+    data = request("GET", f"{API_V2}/list/{list_id(args.list)}/member")
+    members = [
+        {"id": m.get("id"), "username": m.get("username"), "email": m.get("email")}
+        for m in data.get("members", [])
+    ]
+    out({"list": args.list, "members": members})
+
+
 def cmd_list_tasks(args: argparse.Namespace) -> None:
     params = {"page": "0", "subtasks": "true" if args.subtasks else "false"}
     if args.status:
@@ -176,10 +187,20 @@ def cmd_update_task(args: argparse.Namespace) -> None:
         body["status"] = args.status
     if args.priority:
         body["priority"] = PRIORITY_MAP[args.priority]
+    if args.assignee:
+        ids = [int(x) for x in args.assignee.split(",") if x.strip()]
+        body["assignees"] = {"add": ids}
     if not body:
         die("nothing to update")
     data = request("PUT", f"{API_V2}/task/{args.id}", body)
-    out({"id": data.get("id"), "name": data.get("name")})
+    out(
+        {
+            "id": data.get("id"),
+            "name": data.get("name"),
+            "status": (data.get("status") or {}).get("status"),
+            "assignees": [a.get("username") for a in data.get("assignees", [])],
+        }
+    )
 
 
 def cmd_set_type(args: argparse.Namespace) -> None:
@@ -284,6 +305,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("whoami").set_defaults(func=cmd_whoami)
     sub.add_parser("lists").set_defaults(func=cmd_lists)
 
+    p = sub.add_parser("members")
+    p.add_argument("--list", default=DEFAULT_LIST, choices=list(LISTS))
+    p.set_defaults(func=cmd_members)
+
     p = sub.add_parser("list-tasks")
     p.add_argument("--list", default=DEFAULT_LIST, choices=list(LISTS))
     p.add_argument("--status")
@@ -310,6 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--desc")
     p.add_argument("--status")
     p.add_argument("--priority", choices=list(PRIORITY_MAP))
+    p.add_argument("--assignee", help="comma-separated user ids to add as assignees")
     p.set_defaults(func=cmd_update_task)
 
     p = sub.add_parser("set-type")
