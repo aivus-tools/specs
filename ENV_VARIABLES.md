@@ -1,6 +1,6 @@
 # Environment Variables
 
-Все переменные `~/aivus/.env` на проде. Источник истины — [prod-docker-compose.yml](./prod-docker-compose.yml) и [deployment/env.production.template](./deployment/env.production.template).
+Все переменные `~/aivus/.env` на проде. Источник истины — [prod-docker-compose.yml](./prod-docker-compose.yml). Шаблон [deployment/env.production.template](./deployment/env.production.template) вспомогательный и может отставать, сверять с compose.
 
 Категории:
 
@@ -25,7 +25,8 @@
 | `DJANGO_ALLOWED_HOSTS` | конфиг | django | `${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django` |
 | `DJANGO_ADMIN_URL` | секрет | django | Нестандартный path вроде `secret-admin-x7k2/`, заменяет дефолтный `admin/` |
 | `DJANGO_SECURE_SSL_REDIRECT` | конфиг | django | `True` на проде |
-| `DJANGO_DEBUG` | конфиг | django | На проде сейчас `True`, исторически — для удобства, не безопасно для public-facing |
+| `DJANGO_DEBUG` | конфиг | django | На проде `False` (захардкожено в `prod-docker-compose.yml`, не из `.env`). Держать `False` |
+| `GIT_COMMIT` | конфиг | django | Build-time: SHA коммита запекается при build образа (`Dockerfile` ARG + `ci.yml` `build-args`), выводится в admin как unfold ENVIRONMENT badge. Локально default `dev`. На фронте аналог — `NEXT_PUBLIC_GIT_COMMIT` (инлайнится при `next build`) для version-тега в сайдбаре |
 
 ## Database
 
@@ -192,7 +193,7 @@ pgAdmin и Databasus авторизуются через свои UI, отдел
 A: На сервере — `~/data/*.json` с `chmod 644`, mount в контейнеры через `${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro`. Локально — рядом с `prod.env`, дублировать в Vault и приватный GCS bucket (см. DR doc).
 
 **Q: Можно ли тестировать prod-конфиг локально?**
-A: Скопировать `.env`, выставить `APP_DOMAIN=localhost`, `DJANGO_SECURE_SSL_REDIRECT=False`, поднять через `docker compose -f docker-compose.production.yml --env-file .env.local up`. SSL и Traefik будут ругаться, но django/celery поднимутся.
+A: Скопировать `.env`, выставить `APP_DOMAIN=localhost`, `DJANGO_SECURE_SSL_REDIRECT=False`, поднять через `docker compose -f prod-docker-compose.yml --env-file .env.local up`. SSL и Traefik будут ругаться, но django/celery поднимутся.
 
 **Q: Что нельзя оставить дефолтным на проде?**
-A: `DJANGO_ADMIN_URL` (заменить на нестандартный), все секреты (генерировать каждый раз), `DJANGO_DEBUG` (хотя сейчас `True`, это техдолг — должен быть `False`).
+A: `DJANGO_ADMIN_URL` (заменить на нестандартный), все секреты (генерировать каждый раз). `DJANGO_DEBUG` на проде `False`, держать `False`.

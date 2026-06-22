@@ -95,6 +95,24 @@ FINAL_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || ech
 log_info "Docker version: $FINAL_VERSION"
 log_info "Docker API version: $(docker version --format '{{.Server.APIVersion}}' 2>/dev/null || echo "unknown")"
 
+# docker-rollout CLI plugin: zero-downtime redeploys for the django service.
+# The deploy pipeline calls `docker rollout django`; without this plugin it fails.
+ROLLOUT_PLUGIN_DIR="$HOME/.docker/cli-plugins"
+ROLLOUT_PLUGIN_PATH="$ROLLOUT_PLUGIN_DIR/docker-rollout"
+if docker rollout --help >/dev/null 2>&1; then
+    log_success "docker-rollout plugin already installed"
+else
+    log_info "Installing docker-rollout plugin..."
+    mkdir -p "$ROLLOUT_PLUGIN_DIR"
+    curl -fsSL https://raw.githubusercontent.com/wowu/docker-rollout/master/docker-rollout -o "$ROLLOUT_PLUGIN_PATH"
+    chmod +x "$ROLLOUT_PLUGIN_PATH"
+    if docker rollout --help >/dev/null 2>&1; then
+        log_success "docker-rollout plugin installed"
+    else
+        log_warning "docker-rollout install could not be verified; zero-downtime deploy will fall back to downtime"
+    fi
+fi
+
 # ============================================
 # 2. Install Docker Compose
 # ============================================
@@ -237,8 +255,10 @@ services:
   # Django Backend
   # ===========================================
   django:
+    # No container_name on purpose: `docker rollout` scales this service to 2
+    # during deploy (old + new coexist until the new one is healthy), and a fixed
+    # container_name forbids scaling > 1. Re-adding it brings back deploy downtime.
     image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
-    container_name: aivus_django
     restart: unless-stopped
     networks:
       - aivus
@@ -248,14 +268,18 @@ services:
       redis:
         condition: service_healthy
     command: /start
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     environment:
       # Django Core
-      DJANGO_DEBUG: True
-      DEBUG: True
-      DJANGO_DEBUG_TOOLBAR: True
+      DJANGO_DEBUG: "False"
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django
+      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django,localhost,127.0.0.1
       DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
       DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-True}
       
@@ -274,19 +298,21 @@ services:
       # Email (Resend via anymail; production.py hard-codes EMAIL_BACKEND)
       DJANGO_DEFAULT_FROM_EMAIL: ${DJANGO_DEFAULT_FROM_EMAIL}
       DJANGO_SERVER_EMAIL: ${DJANGO_SERVER_EMAIL}
-      
+      RESEND_API_KEY: ${RESEND_API_KEY}
+
       # GCP Storage
       DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-credentials.json
-      
+
       # Sentry
       SENTRY_DSN: ${SENTRY_DSN}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
-      
+
       # HMAC & API
       HMAC_SECRET: ${HMAC_SECRET}
       API_KEY: ${API_KEY}
+      WIX_WEBHOOK_SECRET: ${WIX_WEBHOOK_SECRET}
 
       # LLM (Vertex AI / Gemini)
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
@@ -294,6 +320,10 @@ services:
       VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
 
       # Frontend URL
       FRONTEND_URL: https://${APP_DOMAIN}
@@ -308,6 +338,14 @@ services:
       - "traefik.http.routers.django.entrypoints=websecure"
       - "traefik.http.routers.django.tls.certresolver=letsencrypt"
       - "traefik.http.services.django.loadbalancer.server.port=5000"
+      # Active healthcheck: Traefik stops routing to a container until /healthz
+      # returns 200, so during a rollout the booting new container never gets
+      # traffic. hostname must be in DJANGO_ALLOWED_HOSTS (Traefik otherwise sends
+      # the container IP as Host and Django answers 400 -> backend looks unhealthy).
+      - "traefik.http.services.django.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.django.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.django.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.services.django.loadbalancer.healthcheck.hostname=api.${SERVICE_DOMAIN}"
 
   # ===========================================
   # Celery Worker
@@ -316,6 +354,10 @@ services:
     image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_celeryworker
     restart: unless-stopped
+    # On deploy, give Celery's warm shutdown time to finish in-flight tasks before
+    # SIGKILL (CELERY_TASK_TIME_LIMIT=300s). The default 10s kills long AI tasks
+    # (brief finalization etc.) mid-run, and with acks_late off they are lost.
+    stop_grace_period: 300s
     networks:
       - aivus
     depends_on:
@@ -337,7 +379,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
-      BREVO_API_KEY: ${BREVO_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
       DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-credentials.json
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
@@ -348,6 +390,10 @@ services:
       VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
       FRONTEND_URL: https://${APP_DOMAIN}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
@@ -380,7 +426,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
-      BREVO_API_KEY: ${BREVO_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
       DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
       GOOGLE_APPLICATION_CREDENTIALS: /app/gcp-credentials.json
       SENTRY_DSN: ${SENTRY_DSN}
@@ -392,6 +438,10 @@ services:
       VERTEX_CREDENTIALS_PATH: /app/vertex-credentials.json
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Speech-to-Text
+      STT_MODEL: ${STT_MODEL:-short}
+      GOOGLE_CLOUD_SPEECH_LOCATION: ${GOOGLE_CLOUD_SPEECH_LOCATION:-global}
     volumes:
       - ${GCP_CREDENTIALS_PATH}:/app/gcp-credentials.json:ro
       - ${VERTEX_CREDENTIALS_PATH}:/app/vertex-credentials.json:ro
@@ -421,7 +471,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DJANGO_GCP_STORAGE_BUCKET_NAME: ${DJANGO_GCP_STORAGE_BUCKET_NAME}
-      BREVO_API_KEY: ${BREVO_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.flower.rule=Host(`flower.${SERVICE_DOMAIN}`)"
@@ -460,13 +510,21 @@ services:
   # Next.js Frontend
   # ===========================================
   frontend:
+    # No container_name on purpose: docker rollout scales this service to 2 during
+    # deploy (old + new coexist until the new one is healthy); a fixed name forbids
+    # scaling > 1. Re-adding it brings back deploy downtime on go.aivus.co.
     image: ghcr.io/aivus-tools/frontend:${FRONTEND_TAG:-latest}
-    container_name: aivus_frontend
     restart: unless-stopped
     networks:
       - aivus
     depends_on:
       - django
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     environment:
       # Next.js
       NODE_ENV: development
@@ -494,6 +552,12 @@ services:
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      # Active healthcheck: Traefik routes only to a container serving /api/health
+      # (200), so during a rollout the booting new container never gets traffic.
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.path=/api/health"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.hostname=${APP_DOMAIN}"
 EOF
 
 
@@ -731,11 +795,8 @@ if [ "$EXISTING_INSTALL" = true ]; then
             PGADMIN_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
         fi
         
-        # Ensure BREVO_API_KEY has a value (Django requires it)
-        if [ -z "$BREVO_API_KEY" ]; then
-            BREVO_API_KEY="dummy-key-not-configured"
-            log_warning "BREVO_API_KEY was empty, set to dummy value"
-        fi
+        # Preserve existing RESEND_API_KEY (email via Resend/anymail)
+        RESEND_API_KEY=${RESEND_API_KEY:-}
     else
         log_info "Updating configuration..."
         read -p "Enter your APPLICATION domain [${APP_DOMAIN}]: " NEW_APP_DOMAIN
@@ -764,11 +825,11 @@ if [ "$EXISTING_INSTALL" = true ]; then
             fi
         fi
         
-        read -p "Update Brevo API key? (y/n) [n]: " UPDATE_BREVO
-        if [ "$UPDATE_BREVO" = "y" ]; then
-            read -p "Enter Brevo API key: " NEW_BREVO_API_KEY
-            if [ -n "$NEW_BREVO_API_KEY" ]; then
-                BREVO_API_KEY=$NEW_BREVO_API_KEY
+        read -p "Update Resend API key? (y/n) [n]: " UPDATE_RESEND
+        if [ "$UPDATE_RESEND" = "y" ]; then
+            read -p "Enter Resend API key: " NEW_RESEND_API_KEY
+            if [ -n "$NEW_RESEND_API_KEY" ]; then
+                RESEND_API_KEY=$NEW_RESEND_API_KEY
             fi
         fi
         
@@ -808,13 +869,13 @@ else
         log_warning "Google OAuth not configured. You can add it to .env later if needed."
     fi
     
-    # Optional: Brevo API
-    read -p "Do you have Brevo API key? (y/n): " HAS_BREVO
-    if [ "$HAS_BREVO" = "y" ]; then
-        read -p "Enter Brevo API key: " BREVO_API_KEY
+    # Optional: Resend API (email via anymail)
+    read -p "Do you have Resend API key? (y/n): " HAS_RESEND
+    if [ "$HAS_RESEND" = "y" ]; then
+        read -p "Enter Resend API key: " RESEND_API_KEY
     else
-        BREVO_API_KEY="dummy-key-not-configured"
-        log_warning "Brevo API not configured. Using dummy value. You can add real key to .env later if needed."
+        RESEND_API_KEY=""
+        log_warning "Resend API not configured. Email sending will fail until you add RESEND_API_KEY to .env."
     fi
     
     # Optional: Sentry
@@ -889,6 +950,7 @@ PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD}
 DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
 HMAC_SECRET=${HMAC_SECRET}
 API_KEY=${API_KEY}
+WIX_WEBHOOK_SECRET=${WIX_WEBHOOK_SECRET:-}
 
 # ===========================================
 # DJANGO CONFIGURATION
@@ -898,10 +960,9 @@ DJANGO_ADMIN_URL=admin/
 DJANGO_SECURE_SSL_REDIRECT=True
 
 # ===========================================
-# EMAIL (BREVO)
+# EMAIL (Resend via anymail)
 # ===========================================
-BREVO_API_KEY=${BREVO_API_KEY}
-BREVO_API_URL=https://api.brevo.com/v3/
+RESEND_API_KEY=${RESEND_API_KEY}
 DJANGO_DEFAULT_FROM_EMAIL=noreply@${APP_DOMAIN}
 DJANGO_SERVER_EMAIL=server@${APP_DOMAIN}
 
@@ -910,6 +971,7 @@ DJANGO_SERVER_EMAIL=server@${APP_DOMAIN}
 # ===========================================
 DJANGO_GCP_STORAGE_BUCKET_NAME=${GCP_BUCKET_NAME}
 GCP_CREDENTIALS_PATH=$HOME/data/gcp-credentials.json
+VERTEX_CREDENTIALS_PATH=$HOME/data/vertex-credentials.json
 
 # ===========================================
 # SENTRY

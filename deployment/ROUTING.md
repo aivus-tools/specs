@@ -7,9 +7,9 @@
 | Domain | Service | Description |
 |--------|---------|-------------|
 | `go.aivus.co` | **Frontend** | Next.js application (all routes) |
-| `api.aivus.co` | **Django Backend** | REST API, Admin, Static files |
+| `api.aivus.co` | **Django Backend** | REST API, Admin |
 | `flower.aivus.co` | **Flower** | Celery monitoring (Basic Auth) |
-| `mailpit.aivus.co` | **Mailpit** | Email testing (Basic Auth) |
+| `databasus.aivus.co` | **Databasus** | PostgreSQL backups UI |
 | `pgadmin.aivus.co` | **pgAdmin** | Database management |
 | `traefik.aivus.co` | **Traefik Dashboard** | Reverse proxy dashboard (Basic Auth) |
 
@@ -37,33 +37,33 @@
 **Examples:**
 - `https://api.aivus.co/api/v1/` - REST API
 - `https://api.aivus.co/admin/` - Django Admin
-- `https://api.aivus.co/static/` - Static files
-- `https://api.aivus.co/media/` - Media files
 
-### Services (Basic Auth Protected)
+Static and media files are not served by Django: they live in Google Cloud Storage (`storage.googleapis.com/<bucket>/static/` and `/media/`).
+
+### Services
 
 #### Flower (`flower.aivus.co`)
 - **Service**: Celery Flower
 - **Port**: 5555
-- **Auth**: Basic Auth (see `CREDENTIALS.txt`)
+- **Auth**: Traefik Basic Auth (see `CREDENTIALS.txt`)
 - **Purpose**: Monitor Celery tasks
 
-#### Mailpit (`mailpit.aivus.co`)
-- **Service**: Mailpit
-- **Port**: 8025
-- **Auth**: Basic Auth (see `CREDENTIALS.txt`)
-- **Purpose**: Test emails in staging/production
+#### Databasus (`databasus.aivus.co`)
+- **Service**: Databasus
+- **Port**: 4005
+- **Auth**: Databasus login (own app auth)
+- **Purpose**: PostgreSQL backups UI
 
 #### pgAdmin (`pgadmin.aivus.co`)
 - **Service**: pgAdmin 4
 - **Port**: 80
-- **Auth**: pgAdmin login (see `CREDENTIALS.txt`)
+- **Auth**: pgAdmin login only (its Traefik basicauth middleware is commented out in the compose)
 - **Purpose**: Database management
 
 #### Traefik (`traefik.aivus.co`)
 - **Service**: Traefik Dashboard
 - **Port**: 8080
-- **Auth**: Basic Auth (see `CREDENTIALS.txt`)
+- **Auth**: Traefik Basic Auth (see `CREDENTIALS.txt`)
 - **Purpose**: Monitor reverse proxy
 
 ## Internal Communication
@@ -89,9 +89,13 @@ Celery → Redis:     redis:6379
 
 ## Traefik Configuration
 
+The production compose file lives at `~/aivus/docker-compose.production.yml` on the server; a snapshot is committed at `Specs/prod-docker-compose.yml`. Deploys are zero-downtime via `docker rollout`, which scales the `django` and `frontend` services to 2 (old plus new running side by side until the new container is healthy). Because of that, neither service sets `container_name` - target those containers by id, not by name. Full deploy flow is in [../DEPLOYMENT.md](../DEPLOYMENT.md).
+
+Routing is gated by active Traefik healthchecks: Traefik does not send traffic to a container until its healthcheck returns 200, so during a rollout the booting new container never receives requests. Django is checked on `GET /healthz`, the frontend on `GET /api/health`. The healthcheck `hostname` must be the public host (in `DJANGO_ALLOWED_HOSTS` for Django), otherwise Traefik sends the container IP as `Host` and Django answers 400, which looks like an unhealthy backend.
+
 ### Labels Structure
 
-**Django (Simple):**
+**Django:**
 ```yaml
 labels:
   - "traefik.enable=true"
@@ -99,9 +103,14 @@ labels:
   - "traefik.http.routers.django.entrypoints=websecure"
   - "traefik.http.routers.django.tls.certresolver=letsencrypt"
   - "traefik.http.services.django.loadbalancer.server.port=5000"
+  # Active healthcheck gates rollout traffic
+  - "traefik.http.services.django.loadbalancer.healthcheck.path=/healthz"
+  - "traefik.http.services.django.loadbalancer.healthcheck.interval=5s"
+  - "traefik.http.services.django.loadbalancer.healthcheck.timeout=3s"
+  - "traefik.http.services.django.loadbalancer.healthcheck.hostname=api.${SERVICE_DOMAIN}"
 ```
 
-**Frontend (Simple):**
+**Frontend:**
 ```yaml
 labels:
   - "traefik.enable=true"
@@ -109,6 +118,11 @@ labels:
   - "traefik.http.routers.frontend.entrypoints=websecure"
   - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
   - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+  # Active healthcheck gates rollout traffic
+  - "traefik.http.services.frontend.loadbalancer.healthcheck.path=/api/health"
+  - "traefik.http.services.frontend.loadbalancer.healthcheck.interval=5s"
+  - "traefik.http.services.frontend.loadbalancer.healthcheck.timeout=3s"
+  - "traefik.http.services.frontend.loadbalancer.healthcheck.hostname=${APP_DOMAIN}"
 ```
 
 **Service with Basic Auth (e.g., Flower):**
@@ -123,17 +137,27 @@ labels:
   - "traefik.http.middlewares.flower-auth.basicauth.users=${FLOWER_BASIC_AUTH}"
 ```
 
+**Databasus (no Traefik auth, app login only):**
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.databasus.rule=Host(`databasus.${SERVICE_DOMAIN}`)"
+  - "traefik.http.routers.databasus.entrypoints=websecure"
+  - "traefik.http.routers.databasus.tls.certresolver=letsencrypt"
+  - "traefik.http.services.databasus.loadbalancer.server.port=4005"
+```
+
 ## DNS Configuration
 
 Ensure the following DNS A records point to your server IP:
 
 ```
-go.aivus.co       → YOUR_SERVER_IP
-api.aivus.co      → YOUR_SERVER_IP
-flower.aivus.co   → YOUR_SERVER_IP
-mailpit.aivus.co  → YOUR_SERVER_IP
-pgadmin.aivus.co  → YOUR_SERVER_IP
-traefik.aivus.co  → YOUR_SERVER_IP
+go.aivus.co        → YOUR_SERVER_IP
+api.aivus.co       → YOUR_SERVER_IP
+flower.aivus.co    → YOUR_SERVER_IP
+databasus.aivus.co → YOUR_SERVER_IP
+pgadmin.aivus.co   → YOUR_SERVER_IP
+traefik.aivus.co   → YOUR_SERVER_IP
 ```
 
 Or use a wildcard:
@@ -184,58 +208,11 @@ dig api.aivus.co
 sudo ufw status
 ```
 
-## Migration from Old Routing
-
-If you're migrating from the old routing structure (where API was on `go.aivus.co/api/`):
-
-### Frontend Changes
-**Old:**
-```typescript
-const API_URL = process.env.API_URL || 'https://go.aivus.co/api'
-```
-
-**New:**
-```typescript
-const API_URL = process.env.API_URL || 'http://django:5000'
-// External: https://api.aivus.co
-```
-
-### Django Changes
-**Old:**
-```python
-ALLOWED_HOSTS = ['go.aivus.co']
-```
-
-**New:**
-```python
-ALLOWED_HOSTS = ['api.aivus.co']
-```
-
-### Update `.env`
-```bash
-# Old
-APP_DOMAIN=go.aivus.co
-SERVICE_DOMAIN=aivus.co
-
-# New (same, but routing is different)
-APP_DOMAIN=go.aivus.co      # Frontend
-SERVICE_DOMAIN=aivus.co     # Services (api.aivus.co, flower.aivus.co, etc.)
-```
-
-## Benefits of New Routing
-
-✅ **Clear separation**: Frontend and Backend on different domains
-✅ **Simpler Traefik config**: No complex path-based routing or priorities
-✅ **Better caching**: Can set different cache policies per domain
-✅ **Easier debugging**: Clear which service is handling each request
-✅ **Standard practice**: API on `api.*` subdomain is industry standard
-✅ **No conflicts**: No risk of frontend routes conflicting with API routes
-
 ## Summary
 
 - 🌐 **Frontend**: `go.aivus.co` (all routes)
-- 🔧 **Backend**: `api.aivus.co` (API + Admin + Static)
-- 🛠️ **Services**: `*.aivus.co` (Flower, Mailpit, pgAdmin, Traefik)
+- 🔧 **Backend**: `api.aivus.co` (API + Admin)
+- 🛠️ **Services**: `*.aivus.co` (Flower, Databasus, pgAdmin, Traefik)
 - 🔒 **SSL**: Automatic via Let's Encrypt
-- 🔐 **Auth**: Basic Auth for admin services, Token for API
+- 🔐 **Auth**: Traefik Basic Auth for Flower and the Traefik dashboard, app-level login for pgAdmin and Databasus, Token (HMAC) for API
 

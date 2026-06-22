@@ -112,8 +112,10 @@ services:
   # Django Backend
   # ===========================================
   django:
+    # No container_name on purpose: `docker rollout` scales this service to 2
+    # during deploy (old + new coexist until the new one is healthy), and a fixed
+    # container_name forbids scaling > 1. Re-adding it brings back deploy downtime.
     image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
-    container_name: aivus_django
     restart: unless-stopped
     networks:
       - aivus
@@ -123,14 +125,18 @@ services:
       redis:
         condition: service_healthy
     command: /start
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     environment:
       # Django Core
-      DJANGO_DEBUG: True
-      DEBUG: True
-      DJANGO_DEBUG_TOOLBAR: True
+      DJANGO_DEBUG: "False"
       DJANGO_SETTINGS_MODULE: config.settings.production
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django
+      DJANGO_ALLOWED_HOSTS: ${APP_DOMAIN},www.${APP_DOMAIN},api.${SERVICE_DOMAIN},django,localhost,127.0.0.1
       DJANGO_ADMIN_URL: ${DJANGO_ADMIN_URL}
       DJANGO_SECURE_SSL_REDIRECT: ${DJANGO_SECURE_SSL_REDIRECT:-True}
 
@@ -188,6 +194,14 @@ services:
       - "traefik.http.routers.django.entrypoints=websecure"
       - "traefik.http.routers.django.tls.certresolver=letsencrypt"
       - "traefik.http.services.django.loadbalancer.server.port=5000"
+      # Active healthcheck: Traefik stops routing to a container until /healthz
+      # returns 200, so during a rollout the booting new container never gets
+      # traffic. hostname must be in DJANGO_ALLOWED_HOSTS (Traefik otherwise sends
+      # the container IP as Host and Django answers 400 -> backend looks unhealthy).
+      - "traefik.http.services.django.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.django.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.django.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.services.django.loadbalancer.healthcheck.hostname=api.${SERVICE_DOMAIN}"
 
   # ===========================================
   # Celery Worker
@@ -196,6 +210,10 @@ services:
     image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}
     container_name: aivus_celeryworker
     restart: unless-stopped
+    # On deploy, give Celery's warm shutdown time to finish in-flight tasks before
+    # SIGKILL (CELERY_TASK_TIME_LIMIT=300s). The default 10s kills long AI tasks
+    # (brief finalization etc.) mid-run, and with acks_late off they are lost.
+    stop_grace_period: 300s
     networks:
       - aivus
     depends_on:
@@ -345,13 +363,21 @@ services:
   # Next.js Frontend
   # ===========================================
   frontend:
+    # No container_name on purpose: docker rollout scales this service to 2 during
+    # deploy (old + new coexist until the new one is healthy); a fixed name forbids
+    # scaling > 1. Re-adding it brings back deploy downtime on go.aivus.co.
     image: ghcr.io/aivus-tools/frontend:${FRONTEND_TAG:-latest}
-    container_name: aivus_frontend
     restart: unless-stopped
     networks:
       - aivus
     depends_on:
       - django
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     environment:
       # Next.js
       NODE_ENV: development
@@ -379,3 +405,9 @@ services:
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      # Active healthcheck: Traefik routes only to a container serving /api/health
+      # (200), so during a rollout the booting new container never gets traffic.
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.path=/api/health"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.services.frontend.loadbalancer.healthcheck.hostname=${APP_DOMAIN}"

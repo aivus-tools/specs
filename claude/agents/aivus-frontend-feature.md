@@ -247,5 +247,4 @@ Mobile-first рефакторинг развёрнут. styled-components, Mobil
 - skill `aivus-base`, skill `aivus-frontend`
 - `themeConfig.ts` — antd tokens (source-of-truth для дизайна в TSX)
 - `globals.css` — CSS aliases (зеркало для `.module.css`) + domain colors
-- `Specs/qa-reports/qa-*-2026-05-16.md` — последний независимый QA, исторические находки
 - MEMORY.md — статус проекта

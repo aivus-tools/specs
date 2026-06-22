@@ -92,19 +92,59 @@ Traefik labels в [prod-docker-compose.yml](./prod-docker-compose.yml). Хост
 
 ## CI/CD
 
-GitHub Actions собирают и пушат образы в **GHCR** (не GCP Artifact Registry):
+GitHub Actions собирают и пушат образы в **GHCR**, затем деплоят на сервер по SSH. Backend pipeline — `backend-py/.github/workflows/ci.yml` (деплоит с `main`), frontend — `frontend/.github/workflows/ci.yml` (деплоит с `master`). Оба: `lint` → `test` → `build-and-push` → `deploy` (SSH + `docker rollout`).
 
-- Backend: [deployment/deploy-backend.sh](./deployment/deploy-backend.sh) — собирается из `Backend/aivus_backend/Dockerfile`, тегается, пушится в `ghcr.io/aivus-tools/backend-py`.
-- Frontend: [deployment/deploy-frontend.sh](./deployment/deploy-frontend.sh) — `ghcr.io/aivus-tools/frontend`.
+### Zero-downtime backend deploy
 
-Деплой на сервер — ручной: после успешного билда зайти на сервер и:
+Раньше деплой давал 5+ минут 502: контейнер django стартовал командой `/start`, которая до запуска gunicorn гоняла `migrate` и `collectstatic` (статика в GCS, сотни сетевых обращений). Контейнер был `Up`, но порт 5000 не слушал, а Traefik уже слал в него трафик. Сейчас:
+
+- `/start` запускает только gunicorn (`--preload`), без migrate и collectstatic. Cold-start — секунды;
+- migrate и collectstatic вынесены в **условные one-shot шаги** деплоя. Job `changes` через `dorny/paths-filter` смотрит diff коммита: `migrate` гоняется только если в коммите есть `**/migrations/*.py`, `collectstatic` — только если менялись `**/static/**`, `pyproject.toml` или `uv.lock`. На `workflow_dispatch` оба шага форсятся (нет базы для diff);
+- swap контейнера django — через `docker rollout -t 180 --wait-after-healthy 10`: новый контейнер поднимается рядом со старым, Traefik по active healthcheck (`/healthz`) не пускает трафик в неготовый, старый гасится только через 10с после `healthy` (запас, чтобы Traefik успел подхватить новый бэкенд). Downtime для внешнего трафика через Traefik (`api.aivus.co`) — ноль;
+- ВАЖНО: rollout работает без простоя только когда у старого и нового контейнера **одинаковый набор Traefik-лейблов**. Если лейблы разошлись (например, в этом релизе добавили `healthcheck`, а старый контейнер был создан до этого), Traefik увидит "Service defined multiple times with different configurations" и временно уронит сервис в 404. Поэтому любой релиз, меняющий Traefik-лейблы django, даёт одноразовый блип на самом cutover; следующие релизы с уже совпадающими лейблами идут в ноль;
+- одно-шаговые контейнеры migrate/collectstatic запускаются с `--label traefik.enable=false`, чтобы Traefik не подхватил их как backend.
+
+Health-точка — `GET /healthz` (liveness, без БД), помечена `@public_endpoint` и обходит HMAC.
+
+**Миграции обязаны быть обратно совместимы.** `migrate` выполняется до переключения трафика на новый контейнер и до пересоздания celery, поэтому в окне rollout новая схема БД сосуществует со старым кодом django и старыми celery-воркерами. Деструктивные изменения (drop/rename колонки, NOT NULL без default) разносить на два релиза: сначала задеплоить код, переставший использовать поле, затем отдельным релизом удалить поле. Аддитивные миграции безопасны.
+
+**Остаточный блип внутреннего пути.** Frontend ходит в backend напрямую по `http://django:5000` (SSR-прокси в `middleware.ts`), минуя Traefik. В момент rollout DNS-alias `django` секунды отдаёт оба контейнера round-robin, и часть SSR-запросов может попасть в ещё буутящийся новый контейнер. Это секунды частичных ошибок на страницах с SSR-вызовами, не пятиминутный простой. Проба `api.aivus.co/healthz` этот путь не видит. Полностью закрыть — отдельной задачей: завести внутренний Traefik-роут для django и переключить `API_URL` фронта на него, тогда healthcheck Traefik уберёт неготовый контейнер из ротации и для внутреннего пути.
+
+### Zero-downtime frontend deploy
+
+Frontend (`go.aivus.co`) на том же паттерне: swap через `docker rollout -t 180 --wait-after-healthy 10`, у сервиса `frontend` убран `container_name`, добавлены Docker healthcheck и Traefik active healthcheck на `GET /api/health` (Next.js route handler, вне middleware-matcher, поэтому без NextAuth и SSR-прокси). Миграций и collectstatic у фронта нет — статика собирается в образ на билде, деплой это `pull` + `docker rollout`. Тот же одноразовый блип на первом cutover при смене Traefik-лейблов, дальше ноль.
+
+### Server prerequisites (one-time)
+
+Чтобы новый pipeline работал, на сервере нужно:
+
+1. Поставить плагин docker-rollout (новый `install.sh` ставит автоматически):
+   ```bash
+   mkdir -p ~/.docker/cli-plugins
+   curl -fsSL https://raw.githubusercontent.com/wowu/docker-rollout/master/docker-rollout \
+     -o ~/.docker/cli-plugins/docker-rollout
+   chmod +x ~/.docker/cli-plugins/docker-rollout
+   docker rollout --help    # проверка
+   ```
+2. Привести `~/aivus/docker-compose.production.yml` к снапшоту [prod-docker-compose.yml](./prod-docker-compose.yml): у сервиса django убрать `container_name`, выключить `DJANGO_DEBUG`, добавить `localhost,127.0.0.1` в `DJANGO_ALLOWED_HOSTS`, добавить `healthcheck` и Traefik-healthcheck labels (`/healthz`). То же для сервиса `frontend`: убрать `container_name`, добавить `healthcheck` и Traefik-healthcheck labels (`/api/health`). Применить через rollout вместе с первым деплоем нового образа.
+
+Если healthcheck в живом compose не применён, деплой не пройдёт: и CI, и `deploy-*.sh` делают precheck (`compose config | grep /healthz` для бэка, `/api/health` для фронта) и падают с явной ошибкой, а не уходят в слепой `docker rollout` fallback (он без healthcheck просто ждёт 10с и гасит старый контейнер, возвращая 502).
+
+Внимание: повторный запуск `install.sh` на живом сервере **перезаписывает** `~/aivus/docker-compose.production.yml` и `.env` из своих шаблонов. Перед перегенерацией сверять результат с текущим живым файлом.
+
+Ручной деплой (без CI) — [deployment/deploy-backend.sh](./deployment/deploy-backend.sh).
+
+### Проверка downtime
+
+Замерить реальный простой при релизе снаружи:
 
 ```bash
-cd ~/aivus
-docker compose -f docker-compose.production.yml pull
-docker compose -f docker-compose.production.yml up -d
-docker compose -f docker-compose.production.yml exec django python manage.py migrate
+# в одном терминале
+./Specs/deployment/probe-downtime.sh https://api.aivus.co/healthz 0.2
+# в другом — триггернуть деплой (push в main или workflow_dispatch), затем Ctrl-C
 ```
+
+В сводке смотреть "longest outage": цель — 0s. В логах job `deploy` видно тайминг (`rollout took Ns`, `DONE in Ns`) и какие шаги отработали (`migrate=… static=…`).
 
 ## Операции
 

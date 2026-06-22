@@ -1,6 +1,6 @@
 # Архитектура Aivus
 
-Состояние на май 2026. Все ссылки на код — относительные пути от корня основного репо.
+Состояние на июнь 2026. Все ссылки на код — относительные пути от корня основного репо.
 
 ## Продукт
 
@@ -40,13 +40,13 @@ DRF не используется — все views функциональные.
 | antd | 5.22.5 | package.json:37 |
 | @ant-design/nextjs-registry | 1.0.2 | package.json:26 |
 | @ant-design/v5-patch-for-react-19 | 1.0.3 | package.json:27 |
-| styled-components | 6.1.13 | package.json:59 |
 | TipTap | 3.22.2 | package.json:30-35 |
-| TinyMCE | 6.3.0 | package.json:29 |
+| TinyMCE | 8.3.2 | package.json:61 |
+| @tinymce/tinymce-react | 6.3.0 | package.json:31 |
 | Vitest | 4.0.18 | package.json:103 |
 | Playwright | 1.58.2 | package.json:67 |
 
-Tailwind не используется. Стили — antd темы (`ConfigProvider` в [Frontend/src/app/layout.tsx](../Frontend/src/app/layout.tsx)) плюс CSS Modules и styled-components для точечной кастомизации.
+Tailwind и styled-components не используются. Стили — antd темы (`ConfigProvider` в [Frontend/src/app/layout.tsx](../Frontend/src/app/layout.tsx)) плюс CSS Modules.
 
 ## Структура
 
@@ -66,15 +66,15 @@ Settings: [Backend/aivus_backend/config/settings/](../Backend/aivus_backend/conf
 
 [Frontend/src/](../Frontend/src/):
 
-- `app/` — Next.js App Router. Корневой layout с `ConfigProvider(antd)`, `StyledComponentsRegistry`, `SessionProvider`. Используются параллельные слоты `@client / @vendor / @unknown`.
+- `app/` — Next.js App Router. Корневой layout с `AntdRegistry`, `ConfigProvider(antd)`, `AntdAppProvider`, `SessionProvider`. Используются параллельные слоты `@client / @vendor / @unknown`.
 - `auth/` — NextAuth конфиг ([Frontend/src/auth/auth.ts](../Frontend/src/auth/auth.ts)) и server actions.
-- `components/` — переиспользуемые UI (Auth, Modal, Profile, ProjectItem, Search и т.д.).
+- `components/` — переиспользуемые UI (Auth, Profile, ProjectItem, Search, PageSpinner, EmailConfirmationBanner, layout и т.д.).
 - `modules/` — фича-модули:
-  - `client/` — BriefForm, BriefChat, BriefChatV2, BriefEditorV2, ComparisonTable, PreVendors;
+  - `client/` — BriefChat, BriefEditor, ComparisonTable, PreVendors;
   - `vendor/` — dashboard, estimation, rates, sider, project-details, client-offer, SaveTemplateModal, export, VendorSettingsSection;
   - `shared/` — ProfileForm, SettingsForm;
   - `OfferTabs`, `PublicOffer`, `SharePopup`, `Sidebar`.
-- `services/client/` — RTK Query endpoints (16 файлов `*Api.ts`).
+- `services/client/` — RTK Query endpoints (15 файлов `*Api.ts`).
 - `services/server/` — server-side actions.
 - `store/` — Redux store, rootReducer, slices (`project/`, `offer/`, `vendor.ts`, `sidebar.ts`).
 - `lib/` — `i18n.ts`, `themeConfig.ts`, `hmac.ts`, `logger.ts`, `listenerMiddleware.ts`.
@@ -85,28 +85,29 @@ Settings: [Backend/aivus_backend/config/settings/](../Backend/aivus_backend/conf
 
 ## Модели данных
 
-Полные определения — [Backend/aivus_backend/aivus_backend/](../Backend/aivus_backend/aivus_backend/). Здесь только ключевые поля и связи.
+Полные определения — [Backend/aivus_backend/aivus_backend/](../Backend/aivus_backend/aivus_backend/). Здесь только ключевые поля и связи. Точные позиции моделей в файле смещаются от правки к правке, поэтому конкретные номера строк не приводятся: список классов — `grep '^class' models.py`.
 
 ### users/models.py
 
 | Модель | Ключевые поля |
 |---|---|
-| `User` (line 18) | UUID pk, email-only auth, group (UNCONFIRMED/CONFIRMED/VENDOR/CLIENT/SYSTEM), name, position, avatar, auth_type, pending_brief_id, pending_brief_token |
-| `Client` (line 170) | name, ein, owner FK→User |
-| `Vendor` (line 193) | name, owner FK→User |
-| `Team` (line 215) | name (зарезервировано под коллаборацию) |
-| `UserTeam` (line 232) | user FK, team FK, role |
-| `UserSettings` (line 260) | language, nda_accepted, notifications |
-| `VendorSettings` (line 283) | logo, company_name, agency_name, fringes_percent, handling_percent (брендинг + проценты надбавок) |
+| `User` | UUID pk, email-only auth, group (UNCONFIRMED/CONFIRMED/VENDOR/CLIENT/SYSTEM), name, position, avatar, auth_type, email_confirmed_at, pending_brief_id, pending_brief_token |
+| `Client` | name, ein, owner FK→User |
+| `Vendor` | name, owner FK→User |
+| `Team` | name (зарезервировано под коллаборацию) |
+| `UserTeam` | user FK, team FK, role |
+| `UserSettings` | language, nda_accepted, notifications |
+| `VendorSettings` | logo, company_name, agency_name, fringes_percent, handling_percent (брендинг + проценты надбавок) |
+| `VendorWebhookKey` | vendor OneToOne, key unique (аутентификация Wix / personal-link вебхуков) |
 
 ### catalog/models.py
 
 | Модель | Ключевые поля |
 |---|---|
-| `Category` (line 17) | name, parent_category self-ref, level, tags, code |
-| `Unit` (line 59) | name, symbol, dimension, is_default |
-| `Entry` (line 89) | name, code, description, is_approved, category FK |
-| `EntryUnit` (line 116) | entry FK, unit FK, is_default |
+| `Category` | name, parent_category self-ref, level, tags, code |
+| `Unit` | name, symbol, dimension, is_default |
+| `Entry` | name, code, description, is_approved, category FK |
+| `EntryUnit` | entry FK, unit FK, is_default |
 
 ### projects/models.py
 
@@ -114,40 +115,40 @@ Settings: [Backend/aivus_backend/config/settings/](../Backend/aivus_backend/conf
 
 | Модель | Ключевые поля |
 |---|---|
-| `Brief` (line 35) | status, details JSON, structured_data JSON, client FK, anonymous_token, token counts, cost tracking |
-| `Project` (line 78) | name, vendor FK, brief FK, team FK, status, crm_id, description, client info |
-| `ProjectCollaborator` (line 145) | project FK, user FK, name, email, role |
-| `ClientManager` (line 184) | name, position |
-| `Offer` (line 287) | project_name, parent_offer self-ref (history), project FK, cost, profit, проценты |
-| `OfferEntry` (line 356) | offer FK, entry FK, category FK, price, cost, client_price, client_cost, tax, market_range |
-| `OfferRate` (line 414) | M2M Offer↔Rate со снимком (name, base_price, total_price, options, quantity) |
-| `OfferDeliverable` (line 450) | quantity, duration, duration_unit, notes, sort_order |
-| `OfferScheduleEntry` (line 476) | phase_type, days, hours_per_day |
-| `Share` (line 502) | offer FK, token unique, is_active, created_by FK |
-| `BriefOffer` (line 539) | brief FK, offer FK, linked_by FK |
-| `Template` (line 572) | name, vendor FK, source_offer FK, details JSON snapshot |
-| `Rate` (line 235) | name, vendor FK, entry FK, base_price, total_price, options JSON |
-| `SimpleRate` (line 206) | vendor FK, entry FK, value decimal |
-| `RateCard` (line 604) | vendor FK, name |
-| `RateCardItem` (line 677) | rate_card FK, entry FK, item_name, price, unit FK |
+| `Brief` | status, source, conversation_status, details JSON, structured_data JSON, client FK, anonymous_token, token counts, cost tracking |
+| `Project` | name, vendor FK, brief FK, team FK, status, crm_id, description, client info |
+| `ProjectCollaborator` | project FK, user FK, name, email, role |
+| `ClientManager` | name, position |
+| `Offer` | project_name, parent_offer self-ref (history), project FK, cost, profit, проценты |
+| `OfferEntry` | offer FK, entry FK, category FK, price, cost, client_price, client_cost, tax, market_range |
+| `OfferRate` | M2M Offer↔Rate со снимком (name, base_price, total_price, options, quantity) |
+| `OfferDeliverable` | quantity, duration, duration_unit, notes, sort_order |
+| `OfferScheduleEntry` | phase_type, days, hours_per_day |
+| `Share` | offer FK, token unique, is_active, created_by FK |
+| `BriefOffer` | brief FK, offer FK, linked_by FK |
+| `Template` | name, vendor FK, source_offer FK, details JSON snapshot |
+| `Rate` | name, vendor FK, entry FK, base_price, total_price, options JSON |
+| `SimpleRate` | vendor FK, entry FK, value decimal |
+| `RateCard` | vendor FK, name |
+| `RateCardItem` | rate_card FK, entry FK, item_name, price, unit FK |
 
 Brief AI v3 (см. отдельный раздел ниже):
 
 | Модель | Ключевые поля |
 |---|---|
-| `ChatMessage` (line 626) | brief FK, user FK, anonymous_token, role, kind, content, input/output_tokens, cost_usd, model_used, ready_to_finalize |
-| `BriefAttachment` (line 879) | brief FK, message FK, file, filename, mime_type, size_bytes, gemini_file_uri |
-| `BriefFinalDocument` (line 908) | brief FK, kind, html, plain_text |
-| `BriefShare` (line 787) | brief OneToOne, token unique, is_active, created_by FK |
-| `BriefPrompt` (line 827) | slug (BriefPromptSlug enum), title, body, version, is_active, model_name, metadata JSON, created_by FK, unique (slug, version) и одна active per slug |
-| `BriefFeedback` (line 715) | brief FK, message FK, rating, comment, user FK |
-| `LLMCallTrace` (line 746) | message FK, final_document FK, purpose, model, request_messages/params JSON, response_raw, token counts, cost, latency_ms, sequence |
+| `ChatMessage` | brief FK, user FK, anonymous_token, role, kind, content, input/output_tokens, cost_usd, model_used, ready_to_finalize |
+| `BriefAttachment` | brief FK, message FK, file, filename, mime_type, size_bytes, gemini_file_uri |
+| `BriefFinalDocument` | brief FK, kind, html, plain_text |
+| `BriefShare` | brief OneToOne, token unique, is_active, created_by FK |
+| `BriefPrompt` | slug (BriefPromptSlug enum), title, body, version, is_active, model_name, metadata JSON, created_by FK, unique (slug, version) и одна active per slug |
+| `BriefFeedback` | brief FK, message FK, rating, comment, user FK |
+| `LLMCallTrace` | message FK, final_document FK, purpose, model, request_messages/params JSON, response_raw, token counts, cost, latency_ms, sequence |
 
 ### vendors/models.py
 
 | Модель | Ключевые поля |
 |---|---|
-| `PreVendor` (line 12) | logo, portfolio_url, title, short_description, language, address, email, rank_label, category_label, sort_order |
+| `PreVendor` | logo, portfolio_url, title, short_description, language, address, email, rank_label, category_label, sort_order |
 
 ## Auth
 
@@ -166,10 +167,10 @@ Brief AI v3 (см. отдельный раздел ниже):
 
 [Backend/aivus_backend/aivus_backend/core/middleware.py](../Backend/aivus_backend/aivus_backend/core/middleware.py):
 
-- `HMACAuthenticationMiddleware` подключена в `MIDDLEWARE` (line 162).
+- `HMACAuthenticationMiddleware` подключена в `MIDDLEWARE` ([base.py](../Backend/aivus_backend/config/settings/base.py):176).
 - Заголовки запроса: `x-timestamp`, `x-user-id`, `x-user-group`, `x-vendor-id`, `x-signature`.
 - Сообщение для подписи: `{METHOD}:{PATH}:{TIMESTAMP}:{USER_ID}:{USER_GROUP}` (HMAC-SHA256 от `HMAC_SECRET`).
-- `TIMESTAMP_TOLERANCE_SECONDS = 60` (line 23).
+- `TIMESTAMP_TOLERANCE_SECONDS = 60` ([core/middleware.py](../Backend/aivus_backend/aivus_backend/core/middleware.py):20).
 - Frontend проксирует `/service/*` → `/api/v1/*` через middleware [Frontend/src/middleware.ts](../Frontend/src/middleware.ts), подписывая запросы на лету.
 
 ## API endpoints
@@ -253,6 +254,9 @@ Brief AI v3 (см. отдельный раздел ниже):
 - `GET /api/v1/public/brief-shares/<token>`
 - `GET /api/v1/public/brief-shares/<token>/documents/<uuid>/pdf`
 
+**Webhook ingest (живой):**
+- `POST /api/v1/public/briefs/ai/from-webhook` — Wix-лендинг / личная ссылка вендора создаёт лида-бриф. Аутентификация — per-vendor `VendorWebhookKey` (заголовок `X-Aivus-Webhook-Key` или ключ в теле), управление ключом через `/api/v1/vendor/webhook-key` и `/rotate`.
+
 ## AI пайплайн
 
 LangGraph выпилен. Унифицированный chat engine — [Backend/aivus_backend/aivus_backend/projects/ai_brief_v3.py](../Backend/aivus_backend/aivus_backend/projects/ai_brief_v3.py).
@@ -312,13 +316,13 @@ Defaults (lines 41-48): `DEFAULT_MODEL=gemini-3.1-pro-preview`, `TITLE_MODEL=gem
 - `generate_first_reply_task` (line 73) — initial AI reply на первое сообщение пользователя.
 - `finalize_brief_task` (line 142) — finalization брифа.
 
-[Backend/aivus_backend/aivus_backend/users/tasks.py](../Backend/aivus_backend/aivus_backend/users/tasks.py): `send_templated_email` (line 21, autoretry).
+[Backend/aivus_backend/aivus_backend/users/tasks.py](../Backend/aivus_backend/aivus_backend/users/tasks.py): `send_templated_email` (line 21, autoretry). Почта уходит через Resend (`anymail.backends.resend.EmailBackend`); Brevo выпилен.
 
 Конфиг — [Backend/aivus_backend/config/settings/base.py](../Backend/aivus_backend/config/settings/base.py):338-377: broker/result backend = `REDIS_URL`, `DatabaseScheduler` от django_celery_beat, `CELERY_TASK_TIME_LIMIT=5*60`, `CELERY_TASK_SOFT_TIME_LIMIT=60`.
 
 ## Frontend routing
 
-Корневой layout — [Frontend/src/app/layout.tsx](../Frontend/src/app/layout.tsx). Обёртки (порядок снаружи внутрь): `StyledComponentsRegistry` (`@ant-design/nextjs-registry`) → `ConfigProvider` (тема из [Frontend/src/lib/themeConfig.ts](../Frontend/src/lib/themeConfig.ts)) → `AntdAppProvider` → `SessionProvider`.
+Корневой layout — [Frontend/src/app/layout.tsx](../Frontend/src/app/layout.tsx). Обёртки (порядок снаружи внутрь): `AntdRegistry` (`@ant-design/nextjs-registry`) → `ConfigProvider` (тема из [Frontend/src/lib/themeConfig.ts](../Frontend/src/lib/themeConfig.ts)) → `AntdAppProvider` → `SessionProvider`.
 
 ### Параллельные слоты
 
@@ -333,8 +337,11 @@ Defaults (lines 41-48): `DEFAULT_MODEL=gemini-3.1-pro-preview`, `TITLE_MODEL=gem
 - `/auth/*` — login, register, confirm-email, forgot/reset password.
 - `/public/[token]` — публичный просмотр offer (через `Share`).
 - `/public-brief/[briefId]`, `/shared-brief/[token]` — публичные briefs.
+- `/brief/[slug]` — личная ссылка вендора / Wix-лендинг для создания брифа.
 - `/external` — внешняя интеграция (XLSX upload).
 - `/export/[offerId]` — экспортная страница.
+
+Liveness: Django `GET /healthz`, Next.js `GET /api/health`.
 
 ### Locale
 
@@ -350,9 +357,9 @@ Defaults (lines 41-48): `DEFAULT_MODEL=gemini-3.1-pro-preview`, `TITLE_MODEL=gem
 
 ### Store
 
-[Frontend/src/store/store.ts](../Frontend/src/store/store.ts):1-46 — `configureStore` с `rootReducer` и middleware всех 16 RTK Query API + `listenerMiddleware`.
+[Frontend/src/store/store.ts](../Frontend/src/store/store.ts):1-46 — `configureStore` с `rootReducer` и middleware всех 15 RTK Query API + `listenerMiddleware`.
 
-[Frontend/src/store/rootReducer.ts](../Frontend/src/store/rootReducer.ts):23-44 — четыре slice-редьюсера (project, sidebar, offer, vendor) и 16 `*Api.reducerPath`.
+[Frontend/src/store/rootReducer.ts](../Frontend/src/store/rootReducer.ts):23-44 — четыре slice-редьюсера (project, sidebar, offer, vendor) и 15 `*Api.reducerPath`.
 
 ### RTK Query
 
@@ -360,7 +367,6 @@ Defaults (lines 41-48): `DEFAULT_MODEL=gemini-3.1-pro-preview`, `TITLE_MODEL=gem
 
 | API | Что делает |
 |---|---|
-| `briefApi` | CRUD legacy briefs |
 | `projectsApi` | Projects (vendor): CRUD, archived, restore, thumbnail |
 | `offersApi` | Offers: CRUD, by project, copy, status update, export-data |
 | `userApi` | changeGroup, confirmEmail, resendConfirmation, forgot/resetPassword |
@@ -390,15 +396,15 @@ Defaults (lines 41-48): `DEFAULT_MODEL=gemini-3.1-pro-preview`, `TITLE_MODEL=gem
 
 ### Backend
 
-27 тестовых файлов. Pytest + pytest-django, `--ds=config.settings.test --reuse-db`. Конфиг — [Backend/aivus_backend/pyproject.toml](../Backend/aivus_backend/pyproject.toml):2-14. Coverage — `django_coverage_plugin`.
+~46 тестовых файлов. Pytest + pytest-django, `--ds=config.settings.test --reuse-db`. Конфиг — [Backend/aivus_backend/pyproject.toml](../Backend/aivus_backend/pyproject.toml):2-14. Coverage — `django_coverage_plugin`.
 
 Линтеры (pre-commit): `ruff check`, `ruff format`, `djLint` (HTML темплейты), `mypy` (с `mypy_django_plugin`).
 
 ### Frontend
 
-26 vitest файлов (jsdom). Конфиг — [Frontend/vitest.config.ts](../Frontend/vitest.config.ts):1-29. Setup — [Frontend/src/test/setup.ts](../Frontend/src/test/setup.ts) (jest-dom, моки env vars).
+~52 vitest файла (jsdom). Конфиг — [Frontend/vitest.config.ts](../Frontend/vitest.config.ts):1-29. Setup — [Frontend/src/test/setup.ts](../Frontend/src/test/setup.ts) (jest-dom, моки env vars).
 
-Playwright e2e — [Frontend/e2e/](../Frontend/e2e/), 8 spec-файлов. Проекты в [Frontend/playwright.config.ts](../Frontend/playwright.config.ts):24-55: `setup`, `smoke` (CI), `chromium` (полный набор), `client-no-auth` (anonymous flow).
+Playwright e2e — [Frontend/e2e/](../Frontend/e2e/). Spec-набор: `brief-v3`, `mobile-smoke`, `tablet-smoke`, `smoke`, плюс `brief-flows/` (live-LLM сценарии) и `client/`. Шесть проектов в [Frontend/playwright.config.ts](../Frontend/playwright.config.ts): `setup`, `smoke` (CI), `chromium` (полный набор), `client-no-auth` (anonymous flow), `client-setup`, `brief-flows`.
 
 Pre-push hook гонит typecheck + vitest (~30 сек).
 

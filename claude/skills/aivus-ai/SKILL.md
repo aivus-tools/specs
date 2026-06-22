@@ -28,7 +28,6 @@ description: "Use ALWAYS for AI/LLM work in Aivus: modifying core/llm.py, ai_bri
 
 **Источники истины** (читай при любой AI-задаче):
 - `memory/project_brief_v3.md` — PO decisions (2026-04-17)
-- `Specs/BRIEF_ARCHITECTURAL_DEBT.md` — актуальный архитектурный долг brief flow (P0/P1/P2) и regression checklist
 - `Specs/archive/AI_REFACTORING_PLAN.md` — история миграции (6 фаз); `Specs/archive/AI_ANALYSIS.md` — аудит v2 с багами, что НЕ повторять в v3
 
 ## LLM клиент (`core/llm.py`)

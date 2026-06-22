@@ -8,7 +8,7 @@
 
 | Файл | Что внутри | Нужен для |
 |---|---|---|
-| `prod.env` | 38 переменных, секреты (`POSTGRES_PASSWORD`, `DJANGO_SECRET_KEY`, `HMAC_SECRET`, `NEXTAUTH_SECRET`, OAuth, Brevo, Sentry...) | новый сервер не подымется без идентичных секретов |
+| `prod.env` | весь набор из prod.env, секреты (`POSTGRES_PASSWORD`, `DJANGO_SECRET_KEY`, `HMAC_SECRET`, `NEXTAUTH_SECRET`, OAuth, Resend, Sentry...) | новый сервер не подымется без идентичных секретов |
 | `gcp-credentials.json` | GCP service account `gha-service-account@pioneering-flag-476313-u2` | GCS storage для медиа, Databasus HMAC-ключи |
 | `vertex-credentials.json` | GCP SA `sa-for-vertex-ai@pioneering-flag-476313-u2` для Vertex AI / Gemini / Speech-to-Text | Brief AI v3 чат + голосовой ввод. На SA должны быть включены: API `aiplatform.googleapis.com` + `speech.googleapis.com`, роли `roles/aiplatform.user` + `roles/speech.client`. Подробности в `Specs/GCP_SETUP.md` → "Runtime: APIs и роли". |
 | `docker-config.ghcr.json` | GHCR PAT для pull `ghcr.io/aivus-tools/*` | образы backend/frontend приватные |
@@ -53,20 +53,12 @@ databasus.aivus.co
 traefik.aivus.co
 ```
 
-### 3. Запустить install.sh
+### 3. Положить .env со старыми секретами
 
-На новом сервере под root:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/<repo>/main/Specs/deployment/install.sh -o install.sh
-bash install.sh
-```
-
-Скрипт поставит Docker, создаст `~/aivus/`, `~/data/`, сгенерирует compose, traefik.yml. Когда он сгенерирует **новый** `.env` с **новыми** секретами — это нам не годится, потому что DB зашифрована старыми. Поэтому сразу после install.sh:
-
-### 4. Перезаписать .env старыми секретами
+Сначала кладём сохранённый `prod.env` на место `~/aivus/.env`, чтобы install.sh нашёл его и предложил сохранить. На новом сервере под root:
 
 ```bash
+mkdir -p /root/aivus
 scp local/prod.env root@<new-ip>:/root/aivus/.env
 chmod 600 /root/aivus/.env
 ```
@@ -76,6 +68,15 @@ chmod 600 /root/aivus/.env
 - `HMAC_SECRET` — общий секрет между frontend и backend, иначе все запросы 401;
 - `DJANGO_SECRET_KEY` — расшифровывает сессии (старые тут же станут невалидны, придётся всем перелогиниться, не критично);
 - `NEXTAUTH_SECRET`, OAuth-credentials, API_KEY — иначе авторизация и интеграции лежат.
+
+### 4. Запустить install.sh
+
+```bash
+curl -sSL https://raw.githubusercontent.com/<repo>/main/Specs/deployment/install.sh -o install.sh
+bash install.sh
+```
+
+Скрипт поставит Docker, создаст `~/aivus/`, `~/data/`, сгенерирует compose и traefik.yml. Он увидит уже лежащий `~/aivus/.env` и предложит выбор: вариант 1 "Keep existing secrets (recommended)" сохраняет старые секреты, вариант 2 генерирует новые. Выбираем **вариант 1**, иначе install.sh перезапишет `.env` новыми секретами и БД, зашифрованная старым `POSTGRES_PASSWORD`, не поднимется.
 
 ### 5. Восстановить credentials.json
 
@@ -145,10 +146,20 @@ docker compose -f docker-compose.production.yml restart django celeryworker cele
 
 ### 9. Smoke-test
 
+Быстрые пробы (django и frontend healthcheck-gated, traefik не маршрутизирует на контейнер, пока healthcheck не вернёт 200; django поднимается под gunicorn `--preload`, миграции - это отдельные условные шаги деплоя, в `/start` их нет):
+
+```bash
+curl https://api.aivus.co/healthz
+curl https://go.aivus.co/api/health
+```
+
+Дальше вручную:
 - открыть `https://go.aivus.co`, залогиниться существующим пользователем;
 - открыть `https://api.aivus.co/admin/`, проверить что список объектов соответствует ожиданиям;
 - создать тестовый бриф — убедиться что Brief AI отвечает (значит Vertex credentials живы);
 - открыть `https://databasus.aivus.co`, проверить что job снова идёт по расписанию (если потерян — пересоздать).
+
+Штатный путь повторного деплоя - zero-downtime через `docker rollout` (django/frontend), а не пересоздание контейнеров.
 
 ## Сценарий 2: тот же сервер, упала только БД
 
@@ -183,7 +194,7 @@ docker compose -f docker-compose.production.yml restart django celeryworker cele
 1. **Автосинк секретов в облако.** Сейчас `prod.env`/credentials лежат только на dev-машине. Стоит настроить ежесуточный rclone-sync `~/aivus/.env` + `~/data/*.json` в отдельный приватный GCS bucket `aivus-secrets-backup` под другим SA, чтобы dev-машина не была единственной точкой отказа.
 2. **Регулярный restore-drill.** Раз в квартал поднимать копию prod в staging-окружении и проверять, что бэкап действительно восстанавливается. Бэкап без проверенного restore — не бэкап.
 3. **Externalized traefik ACME storage.** При смене сервера сертификаты Let's Encrypt перевыпустятся, но если делать это часто, упрёшься в rate-limit. Можно положить acme.json в S3/GCS с шифрованием.
-4. **Pin образов до конкретных тэгов.** `ghcr.io/aivus-tools/backend-py:latest` — `latest` плохо для воспроизводимости; на проде стоит зафиксировать `BACKEND_TAG` в `.env` на конкретный SHA-tag.
+4. **Pin образов до конкретных тэгов.** Compose уже поддерживает пиннинг через `BACKEND_TAG` и `FRONTEND_TAG` (`image: ghcr.io/aivus-tools/backend-py:${BACKEND_TAG:-latest}` и аналогично для frontend), override проброшен. Единственный пробел: на проде эти переменные не заданы, поэтому тэг по умолчанию `latest`, что плохо для воспроизводимости. Действие - выставить `BACKEND_TAG`/`FRONTEND_TAG` в `.env` на конкретный SHA-tag.
 5. **Runbook ротации DNS.** Если основной домен `aivus.co` меняется или Cloudflare уходит — нужен отдельный документ, как переключить.
 
 ## Контакты на случай беды

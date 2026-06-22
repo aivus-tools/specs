@@ -1,100 +1,74 @@
 #!/bin/bash
 
 # ============================================
-# Aivus Frontend Deployment Script
+# Aivus Frontend Deployment Script (manual)
 # ============================================
-# This script is called from GitHub Actions
-# to deploy the frontend to production.
+# Zero-downtime frontend deploy. CI/CD runs the same flow inline from the deploy
+# job in the frontend repo's .github/workflows/ci.yml; use this script for a
+# manual deploy on the server. `docker rollout` swaps the Next.js container
+# without a downtime window on go.aivus.co (Traefik active healthcheck on
+# /api/health gates traffic to the booting container).
 #
 # Usage:
 #   ./deploy-frontend.sh [tag]
-#
-# Example:
-#   ./deploy-frontend.sh v1.2.3
-#   ./deploy-frontend.sh latest
 # ============================================
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Get tag from argument or use 'latest'
 TAG=${1:-latest}
 
 log_info "Starting frontend deployment (tag: ${TAG})..."
 
-# Change to aivus directory
 cd ~/aivus || {
     log_error "Directory ~/aivus not found"
     exit 1
 }
 
-# Check if docker-compose.production.yml exists
-if [ ! -f docker-compose.production.yml ]; then
+[ -f docker-compose.production.yml ] || {
     log_error "docker-compose.production.yml not found"
     exit 1
-fi
-
-# Check if .env exists
-if [ ! -f .env ]; then
+}
+[ -f .env ] || {
     log_error ".env file not found"
+    exit 1
+}
+
+if ! docker rollout --help >/dev/null 2>&1; then
+    log_error "docker-rollout plugin not installed (see install.sh or Specs/deployment/README.md)"
     exit 1
 fi
 
-# Update FRONTEND_TAG in .env
+COMPOSE="docker compose -f docker-compose.production.yml"
+t0=$(date +%s)
+
 log_info "Updating FRONTEND_TAG to ${TAG}..."
-sed -i.bak "s/^FRONTEND_TAG=.*/FRONTEND_TAG=${TAG}/" .env
-rm .env.bak
+sed -i.bak "s/^FRONTEND_TAG=.*/FRONTEND_TAG=${TAG}/" .env && rm .env.bak
 
-# Pull new frontend image
 log_info "Pulling frontend image..."
-docker compose -f docker-compose.production.yml pull frontend
+$COMPOSE pull frontend
 
-# Recreate frontend service
-log_info "Recreating frontend service..."
-docker compose -f docker-compose.production.yml up -d frontend
+$COMPOSE config | grep -q '/api/health' || {
+    log_error "frontend healthcheck missing in live compose; apply Server prerequisites (DEPLOYMENT.md) first"
+    exit 1
+}
 
-# Wait for frontend to be healthy
-log_info "Waiting for frontend to be ready..."
-sleep 10
+log_info "Rolling frontend (zero-downtime)..."
+tr0=$(date +%s)
+docker rollout -t 180 --wait-after-healthy 10 -f docker-compose.production.yml frontend
+tr1=$(date +%s)
+log_success "frontend healthy, rollout took $((tr1 - tr0))s"
 
-# Check service status
-log_info "Checking service status..."
-docker compose -f docker-compose.production.yml ps frontend
+docker image prune -f
+$COMPOSE ps frontend
 
-# Show recent logs
-log_info "Recent logs:"
-docker compose -f docker-compose.production.yml logs --tail=50 frontend
-
-log_success "Frontend deployment completed!"
-
-# Summary
-echo ""
-echo "============================================"
-log_success "Deployment Summary"
-echo "============================================"
-echo "Tag: ${TAG}"
-echo "Service updated: frontend"
-echo ""
-log_info "Check logs with:"
-echo "  docker compose -f docker-compose.production.yml logs -f frontend"
-echo ""
-
-
+t1=$(date +%s)
+log_success "Frontend deployment completed in $((t1 - t0))s (tag: ${TAG})"

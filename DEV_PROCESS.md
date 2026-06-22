@@ -26,7 +26,7 @@
 5. По готовому PRD `to-issues` режет работу на вертикальные слайсы (tracer bullets, каждый сквозь все слои, демонстрируемый сам по себе). Каждый слайс создаётся задачей в Development, в описании ссылка на концепт-эпик. Слайсы помечаются AFK (агент может брать сам) или HITL (нужно решение человека).
 
 **Development:**
-6. Слайс `to do` (готов к работе) → `in progress` (пишу код, red-green-refactor через `tdd`, держу `tsc --noEmit` и vitest зелёными) → `in review` (PR готов, гоняю `/code-review`, при нужде `/simplify`) → `revisions` (правки по ревью) → `complete` (смержено и проверено). `blocked` если завис на внешнем.
+6. Слайс `to do` (готов к работе) → `in progress` (пишу код, red-green-refactor, держу `tsc --noEmit` и vitest зелёными) → `in review` (PR готов, гоняю `/code-review`, при нужде `/simplify`) → `revisions` (правки по ревью) → `complete` (смержено и проверено). `blocked` если завис на внешнем.
 7. Незнакомый кусок кода перед правкой — `zoom-out`, чтобы понять контекст.
 
 ## Поток бага
@@ -47,8 +47,8 @@
 ## Скиллы под этапы
 
 - Conceptualization: `grill-me`, `grill-with-docs`, `to-prd`.
-- Development: `to-issues`, `tdd`, `zoom-out`, `/code-review`, `/simplify`.
-- Bug Tracking: `triage`, `diagnose`, `bug-fix-protocol`.
+- Development: `to-issues`, `zoom-out`, `/code-review`, `/simplify`.
+- Bug Tracking: `bug-fix-protocol`. Триаж (статус `triage`) - действие по листу: оценить баг и заполнить поля, без отдельного скилла.
 
 ## Тексты
 
